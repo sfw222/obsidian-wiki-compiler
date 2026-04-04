@@ -1,0 +1,8 @@
+.wiki-compiler-modal p {
+  margin: 1em 0;
+  color: var(--text-muted);
+}
+
+.wiki-compiler-modal button {
+  margin-top: 0.5em;
+}
