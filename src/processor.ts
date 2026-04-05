@@ -28,8 +28,6 @@ export async function processFiles(
   const errors: string[] = [];
   let done = 0;
 
-  const wikiFolder = `${settings.outputFolder}/${WIKI_SUBFOLDER}`;
-  const existingCategories = getExistingCategories(vault, wikiFolder);
   const existingTitles = await getExistingTitles(vault, settings.outputFolder);
 
   const rawPrefix = `${settings.outputFolder}/${RAW_FOLDER}/`;
@@ -43,7 +41,7 @@ export async function processFiles(
         onProgress(done, pending.length, file.basename);
         try {
           const content = await vault.read(file);
-          const article = await generateArticle(file.basename, content, client, settings, signal, existingCategories, existingTitles);
+          const article = await generateArticle(file.basename, content, client, settings, signal, existingTitles);
           results.push({ ...article, sourceFile: file.path });
 
           const rawFolder = `${settings.outputFolder}/${RAW_FOLDER}`;
@@ -210,13 +208,6 @@ async function incrementallyUpdateRelated(
   return updated;
 }
 
-function getExistingCategories(vault: Vault, outputFolder: string): string[] {  const folder = vault.getAbstractFileByPath(outputFolder);
-  if (!folder || !("children" in folder)) return [];
-  return (folder as any).children
-    .filter((c: any) => "children" in c)
-    .map((c: any) => c.name)
-    .filter((name: string) => name !== "_index");
-}
 
 export async function appendLog(vault: Vault, outputFolder: string, operation: string, items: string[]): Promise<void> {
   const logPath = `${outputFolder}/_log.md`;

@@ -1,5 +1,5 @@
 import { LLMClient } from "../llm/client";
-import { PluginSettings } from "../settings";
+import { PluginSettings, getFallbackCategory } from "../settings";
 
 export interface WikiArticle {
   sourceFile: string;
@@ -16,14 +16,14 @@ You MUST return ONLY a valid JSON object. No explanation, no markdown fences, no
 Required JSON shape:
 {
   "title": "Concise encyclopedic topic title (NOT the original note filename)",
-  "category": "Single domain category (e.g. Machine Learning, Productivity, Biology, History, Philosophy)",
+  "category": "One of the allowed categories listed below",
   "content": "## Overview\\n\\nFull encyclopedic article with multiple ## sections, rich detail, third-person voice. Use [[concept name]] for key cross-references. Minimum 200 words.",
   "relatedTopics": ["Related Topic 1", "Related Topic 2"]
 }
 
 Rules:
-- title: derive a meaningful topic name from the content, NOT the filename
-- category: must be a specific domain, never "Uncategorized"{CAT_HINT}
+- title: derive a meaningful topic name from the content, NOT the filename. Plain text only — NO [[wikilinks]] in the title field
+- category: MUST be exactly one of: [{CATEGORIES}]. Do NOT invent new categories. If none fits, use "{FALLBACK}".
 - content: must be substantive with ## headings and real knowledge extracted from the note
 - relatedTopics: include titles from the existing wiki articles below if relevant, plus any new concepts{EXISTING_HINT}
 - LANGUAGE: {LANGUAGE}`;
@@ -42,35 +42,40 @@ export async function generateArticle(
   client: LLMClient,
   settings: PluginSettings,
   signal?: AbortSignal,
-  existingCategories: string[] = [],
   existingTitles: string[] = []
 ): Promise<WikiArticle> {
-  const catHint = existingCategories.length > 0
-    ? `\nExisting categories (prefer these if appropriate): ${existingCategories.join(", ")}`
-    : "";
+  const fallback = getFallbackCategory(settings.outputLanguage === "auto" ? "en" : settings.outputLanguage);
+  const categories = settings.categories.length > 0 ? settings.categories : [fallback];
   const existingHint = existingTitles.length > 0
     ? `\nExisting wiki articles: ${existingTitles.join(", ")}`
     : "";
   const systemPrompt = SYSTEM_PROMPT
     .replace("{LANGUAGE}", languageInstruction(settings.outputLanguage))
-    .replace("{CAT_HINT}", catHint)
+    .replace("{CATEGORIES}", categories.join(", "))
+    .replace("{FALLBACK}", fallback)
     .replace("{EXISTING_HINT}", existingHint);
 
   const raw = await client.complete(systemPrompt, `Source note title: ${sourceFile}\n\n${content}`, signal);
+
+  const allowedLower = new Set(categories.map((c) => c.toLowerCase()));
 
   try {
     const match = raw.match(/\{[\s\S]*\}/);
     if (!match) throw new Error("No JSON found");
     const parsed = JSON.parse(match[0]);
+    let category = (parsed.category ?? fallback).trim();
+    if (!allowedLower.has(category.toLowerCase())) {
+      category = fallback;
+    }
     return {
       sourceFile,
       title: parsed.title && parsed.title !== sourceFile ? parsed.title : sourceFile,
-      category: parsed.category && parsed.category !== "Uncategorized" ? parsed.category : "General",
+      category,
       content: parsed.content ?? raw,
       relatedTopics: Array.isArray(parsed.relatedTopics) ? parsed.relatedTopics : [],
     };
   } catch {
-    return { sourceFile, title: sourceFile, category: "General", content: raw, relatedTopics: [] };
+    return { sourceFile, title: sourceFile, category: fallback, content: raw, relatedTopics: [] };
   }
 }
 

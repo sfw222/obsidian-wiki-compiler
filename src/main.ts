@@ -2,6 +2,7 @@ import { App, Notice, Plugin, TFile, TFolder, Menu } from "obsidian";
 import { DEFAULT_SETTINGS, PluginSettings, WikiCompilerSettingTab } from "./settings";
 import { processFiles, appendLog, ProcessResult } from "./processor";
 import { ProgressModal } from "./ui/ProgressModal";
+import { ResultModal } from "./ui/ResultModal";
 import { QueryModal } from "./ui/QueryModal";
 import { createLLMClient } from "./llm/client";
 import { queryWiki } from "./wiki/query";
@@ -229,7 +230,7 @@ export default class WikiCompilerPlugin extends Plugin {
         result.conceptsGenerated > 0 ? `✓ ${result.conceptsGenerated} concept(s) created` : null,
         result.errors.length > 0 ? `⚠ ${result.errors.length} error(s): ${result.errors.join("; ")}` : null,
       ].filter(Boolean).join("\n");
-      new Notice(`Wiki Compiler\n${lines}`, 8000);
+      new ResultModal(this.app, "Wiki Compiler", lines).open();
     } catch (e) {
       modal.close();
       if ((e as Error).name !== "AbortError") {

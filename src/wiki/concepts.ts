@@ -1,6 +1,6 @@
 import { TFile, Vault, requestUrl } from "obsidian";
 import { LLMClient } from "../llm/client";
-import { WikiArticle } from "./generator";
+import { WikiArticle, updateExistingArticle } from "./generator";
 
 const EXTRACT_PROMPT = `You are a knowledge analyst. Given a list of wiki articles, extract the most important high-frequency concepts that appear across multiple articles.
 
@@ -31,6 +31,7 @@ export async function extractAndEnrichConcepts(
 ): Promise<number> {
   if (!searxngBaseUrl) return 0;
 
+  const vaultFileMap = buildVaultFileMap(vault);
   const existingConcepts = getExistingConceptTitles(vault, outputFolder);
   const articlesText = articles.map((a) => `# ${a.title}\n${a.content}`).join("\n\n---\n\n");
   const existingHint = existingConcepts.length > 0
@@ -51,32 +52,42 @@ export async function extractAndEnrichConcepts(
   let created = 0;
   for (const concept of concepts) {
     if (signal?.aborted) return created;
-    if (existingConcepts.map((c) => c.toLowerCase()).includes(concept.toLowerCase())) continue;
 
     const searchResults = await searchSearXNG(concept, searxngBaseUrl, searxngToken);
     console.log(`[WikiCompiler] SearXNG "${concept}":`, searchResults ? `${searchResults.length} chars` : "null");
     if (!searchResults) continue;
 
-    const pageContent = await client.complete(
-      CONCEPT_PAGE_PROMPT + `\n\nLANGUAGE: ${outputLanguage === "zh" ? "write in Chinese (中文)" : outputLanguage === "ja" ? "write in Japanese (日本語)" : outputLanguage === "auto" ? "match the language of the concept term" : "write in English"}`,
+    const langHint = outputLanguage === "zh" ? "write in Chinese (中文)" : outputLanguage === "ja" ? "write in Japanese (日本語)" : outputLanguage === "auto" ? "match the language of the concept term" : "write in English";
+    const newContent = await client.complete(
+      CONCEPT_PAGE_PROMPT + `\n\nLANGUAGE: ${langHint}`,
       `Concept: ${concept}\n\nSearch results:\n${searchResults}`,
       signal
     );
 
-    const safeConceptName = concept.replace(/[\\/:*?"<>|]/g, "-").trim();
-    const filePath = `${conceptFolder}/${safeConceptName}.md`;
-    const existing = vault.getAbstractFileByPath(filePath);
-    const frontmatter = `---\ntype: concept\ngenerated: ${new Date().toISOString().slice(0, 10)}\n---\n\n`;
-    const body = frontmatter + `# ${concept}\n\n${pageContent}`;
-    if (existing instanceof TFile) {
-      await vault.modify(existing, body);
+    // Check if a page with this name already exists anywhere in the vault
+    const existingFile = vaultFileMap.get(concept.toLowerCase());
+    if (existingFile) {
+      const existingContent = await vault.read(existingFile);
+      const updated = await updateExistingArticle(existingContent, existingFile.basename, concept, newContent, client, signal);
+      if (updated !== existingContent) {
+        await vault.modify(existingFile, updated);
+      }
     } else {
+      const safeConceptName = concept.replace(/[\\/:*?"<>|]/g, "-").trim();
+      const filePath = `${conceptFolder}/${safeConceptName}.md`;
+      const frontmatter = `---\ntype: concept\ngenerated: ${new Date().toISOString().slice(0, 10)}\n---\n\n`;
+      const body = frontmatter + `# ${concept}\n\n${newContent}`;
       await vault.create(filePath, body);
     }
     created++;
 
+  }
+
+  for (const concept of concepts) {
     await injectConceptLinks(concept, articles, vault, outputFolder);
   }
+  await crossLinkConcepts(vault, outputFolder);
+
   return created;
 }
 
@@ -120,6 +131,43 @@ async function injectConceptLinks(
     const updated = text.replace(regex, `[[${concept}]]`);
     if (updated !== text) await vault.modify(file, updated);
   }
+}
+
+async function crossLinkConcepts(vault: Vault, outputFolder: string): Promise<void> {
+  const conceptFolder = vault.getAbstractFileByPath(`${outputFolder}/Concepts`);
+  if (!conceptFolder || !("children" in conceptFolder)) return;
+
+  const conceptFiles = (conceptFolder as any).children.filter(
+    (c: any) => c instanceof TFile && c.extension === "md"
+  ) as TFile[];
+
+  const conceptNames = conceptFiles.map((f) => f.basename);
+
+  for (const file of conceptFiles) {
+    let text = await vault.read(file);
+    let modified = false;
+
+    for (const other of conceptNames) {
+      if (other.toLowerCase() === file.basename.toLowerCase()) continue;
+      const regex = new RegExp(`(?<!\\[\\[)\\b${escapeRegex(other)}\\b(?!\\]\\])`, "gi");
+      const replaced = text.replace(regex, `[[${other}]]`);
+      if (replaced !== text) {
+        text = replaced;
+        modified = true;
+      }
+    }
+
+    if (modified) await vault.modify(file, text);
+  }
+}
+
+function buildVaultFileMap(vault: Vault): Map<string, TFile> {
+  const map = new Map<string, TFile>();
+  for (const file of vault.getMarkdownFiles()) {
+    const key = file.basename.toLowerCase();
+    if (!map.has(key)) map.set(key, file);
+  }
+  return map;
 }
 
 function getExistingConceptTitles(vault: Vault, outputFolder: string): string[] {

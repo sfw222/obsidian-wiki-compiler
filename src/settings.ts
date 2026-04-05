@@ -13,6 +13,46 @@ export interface PluginSettings {
   maxConcurrent: number;
   searxngBaseUrl: string;
   searxngToken: string;
+  categories: string[];
+}
+
+export const DEFAULT_CATEGORIES: Record<string, string[]> = {
+  en: [
+    "Computer Science", "Mathematics", "Physics", "Chemistry",
+    "Biology", "Medicine", "Engineering",
+    "Economics", "Finance", "Business",
+    "Law", "Education",
+    "Philosophy", "Psychology", "Sociology",
+    "History", "Literature", "Art", "Music",
+    "Others",
+  ],
+  zh: [
+    "计算机科学", "数学", "物理", "化学",
+    "生物", "医学", "工程",
+    "经济学", "金融", "商业",
+    "法律", "教育",
+    "哲学", "心理学", "社会学",
+    "历史", "文学", "艺术", "音乐",
+    "其他",
+  ],
+  ja: [
+    "コンピュータサイエンス", "数学", "物理学", "化学",
+    "生物学", "医学", "工学",
+    "経済学", "金融", "ビジネス",
+    "法学", "教育",
+    "哲学", "心理学", "社会学",
+    "歴史", "文学", "芸術", "音楽",
+    "その他",
+  ],
+};
+
+export function getDefaultCategories(lang: string): string[] {
+  return [...(DEFAULT_CATEGORIES[lang] ?? DEFAULT_CATEGORIES["en"])];
+}
+
+export function getFallbackCategory(lang: string): string {
+  const cats = DEFAULT_CATEGORIES[lang] ?? DEFAULT_CATEGORIES["en"];
+  return cats[cats.length - 1];
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -27,6 +67,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   maxConcurrent: 3,
   searxngBaseUrl: "",
   searxngToken: "",
+  categories: getDefaultCategories("en"),
 };
 
 const PROVIDER_MODELS: Record<string, string> = {
@@ -148,9 +189,37 @@ export class WikiCompilerSettingTab extends PluginSettingTab {
           .addOptions({ auto: "Auto (same as source)", zh: "Chinese (中文)", en: "English", ja: "Japanese (日本語)" })
           .setValue(this.plugin.settings.outputLanguage)
           .onChange(async (v) => {
+            const oldLang = this.plugin.settings.outputLanguage === "auto" ? "en" : this.plugin.settings.outputLanguage;
             this.plugin.settings.outputLanguage = v;
+            const newLang = v === "auto" ? "en" : v;
+            const oldDefaults = getDefaultCategories(oldLang);
+            const currentIsDefault = JSON.stringify(this.plugin.settings.categories) === JSON.stringify(oldDefaults);
+            if (currentIsDefault) {
+              this.plugin.settings.categories = getDefaultCategories(newLang);
+            }
             await this.plugin.saveSettings();
+            this.display();
           })
+      );
+
+    new Setting(containerEl)
+      .setName("Categories")
+      .setDesc("One category per line. Articles MUST be classified into one of these. The last entry is the fallback for uncategorizable articles.")
+      .addTextArea((t) => {
+        t.inputEl.rows = 10;
+        t.inputEl.style.width = "100%";
+        t.setValue(this.plugin.settings.categories.join("\n")).onChange(async (v) => {
+          this.plugin.settings.categories = v.split("\n").map((s) => s.trim()).filter(Boolean);
+          await this.plugin.saveSettings();
+        });
+      })
+      .addButton((b) =>
+        b.setButtonText("Reset to defaults").onClick(async () => {
+          const lang = this.plugin.settings.outputLanguage === "auto" ? "en" : this.plugin.settings.outputLanguage;
+          this.plugin.settings.categories = getDefaultCategories(lang);
+          await this.plugin.saveSettings();
+          this.display();
+        })
       );
 
     new Setting(containerEl)

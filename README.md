@@ -12,9 +12,10 @@ Transform your Obsidian notes into a structured, interconnected Wiki using LLMs.
 
 - **One-click compilation** — right-click any note or folder → "Compile to Wiki"
 - **Recursive folder processing** — processes all `.md` files in subdirectories
-- **Smart categorization** — LLM assigns domain categories; reuses existing categories before creating new ones
+- **Smart categorization** — LLM assigns articles to your custom category list; falls back to the last entry if no match
+- **Customizable categories** — define your own category list in Settings; auto-updates when you switch output language
 - **Bidirectional wikilinks** — new articles link to existing ones, and existing articles are incrementally updated with relevant new knowledge
-- **Concept extraction** — automatically extracts high-frequency concepts across articles, enriches them via SearXNG web search, and generates dedicated concept pages
+- **Concept extraction** — automatically extracts high-frequency concepts across articles, enriches them via SearXNG web search, generates dedicated concept pages, and injects bidirectional links after all pages are created
 - **Wiki query** — ask questions about your wiki and get answers with `[[citations]]`, optionally saved as query notes
 - **Wiki lint** — health check that finds contradictions, orphan pages, missing concepts, and stale content
 - **Source archival** — processed notes are moved to `raw/` folder to avoid reprocessing
@@ -59,6 +60,7 @@ Open **Settings → Wiki Compiler**:
 | Model | Model name | gpt-4o |
 | Output Folder | Where Wiki articles are saved | `Wiki` |
 | Output Language | auto / zh / en / ja | auto |
+| Categories | One per line; last entry is the fallback | (language defaults) |
 | Max Concurrent | Parallel requests (1–10) | 3 |
 | SearXNG Base URL | URL of your SearXNG instance for concept enrichment | — |
 | SearXNG Token | Optional Bearer token for authenticated SearXNG | — |
