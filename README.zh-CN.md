@@ -2,7 +2,7 @@
 
 > 灵感来源于 [Andrej Karpathy 的 LLM 知识库](https://x.com/karpathy/status/2039805659525644595) 理念。
 
-使用 LLM 将 Obsidian 笔记编译成结构化、互相关联的 Wiki。选择一篇笔记或一个文件夹，插件自动生成带有双向 `[[wikilinks]]` 的百科式文章，并按主题自动分类存入子目录。
+使用 LLM 将 Obsidian 笔记编译成结构化、互相关联的 Wiki。选择一篇笔记或一个文件夹，插件自动生成带有双向 `[[wikilinks]]` 的百科式文章，并按主题自动分类存入子目录。还能自动提取高频概念，通过网络搜索生成专属概念页面，持续丰富你的知识库。
 
 [English Documentation](README.md)
 
@@ -11,10 +11,16 @@
 ## 功能特性
 
 - **一键编译** — 右键任意笔记或文件夹 → "Compile to Wiki"
+- **递归处理子目录** — 自动处理所选文件夹下所有子目录中的 `.md` 文件
 - **智能分类** — LLM 自动分配领域分类，优先复用已有分类目录
-- **双向链接** — 新文章链接到已有文章，已有文章的 See Also 自动更新反向链接
-- **处理标记** — 源笔记重命名为 `.wikied.md` 后缀，避免重复处理
+- **双向链接** — 新文章链接到已有文章，已有文章通过 LLM 增量更新相关内容
+- **概念提取** — 自动提取跨文章的高频概念，通过 SearXNG 搜索权威信息，生成专属概念页面
+- **Wiki 问答** — 基于 Wiki 内容提问，LLM 带 `[[引用]]` 回答，可保存为笔记
+- **Wiki 健康检查** — 检测矛盾内容、孤立页面、缺失概念和过时信息
+- **源文件归档** — 处理完成的笔记移入 `raw/` 目录，避免重复处理
 - **累积索引** — `_index.md` 跨会话合并所有文章，按分类层级组织
+- **操作日志** — `_log.md` 记录所有操作（编译、问答、检查、概念提取）
+- **进度界面** — 实时显示处理进度，支持取消操作
 - **多 LLM 支持** — OpenAI、Anthropic (Claude)、Ollama（本地）或任意第三方 API
 
 ---
@@ -49,16 +55,18 @@ npm run build
 | 设置项 | 说明 | 默认值 |
 |--------|------|--------|
 | LLM Provider | OpenAI / Anthropic / Ollama / 自定义 | OpenAI |
-| API Key | 你的 API 密钥（Ollama 不需要） | — |
+| API Key | API 密钥（Ollama 不需要） | — |
 | Model | 模型名称 | gpt-4o |
 | Output Folder | Wiki 文章保存目录 | `Wiki` |
 | Output Language | auto / zh / en / ja | auto |
 | Max Concurrent | 并发请求数（1–10） | 3 |
+| SearXNG Base URL | SearXNG 实例地址，用于概念搜索增强 | — |
+| SearXNG Token | SearXNG 认证 Token（可选） | — |
 
 ### 自定义第三方 API
 
 将 **LLM Provider** 设为 "Custom"，然后配置：
-- **Custom Endpoint URL** — 完整的请求端点 URL，例如 `https://api.minimaxi.com/anthropic/v1/messages`
+- **Custom Endpoint URL** — 完整的请求端点 URL，例如 `https://api.deepseek.com/v1/chat/completions`
 - **API Compatibility** — OpenAI 兼容或 Anthropic 兼容
 - **API Key** 和 **Model**
 
@@ -78,16 +86,48 @@ npm run build
 
 或使用命令面板：`Wiki Compiler: Process folder (enter path)`
 
+会递归处理所有子目录中的 `.md` 文件。
+
+### Wiki 问答
+
+命令面板：`Wiki Compiler: Query Wiki`
+
+打开问答窗口，输入问题后 LLM 基于 Wiki 内容回答并附带 `[[wikilink]]` 引用。点击 **Save to Wiki** 将问答保存为 `Wiki/Queries/` 下的笔记。
+
+### 健康检查
+
+命令面板：`Wiki Compiler: Lint Wiki (health check)`
+
+生成 `_lint-report.md` 报告，包含：
+- 页面间的矛盾信息
+- 无入链的孤立页面
+- 值得独立成页的缺失概念
+- 过时或陈旧的内容
+
+### 概念提取
+
+命令面板：`Wiki Compiler: Extract Concepts (retry SearXNG)`
+
+手动触发概念提取，需配置 SearXNG。插件识别跨文章高频概念，通过网络搜索权威信息，生成专属概念页面，并将 `[[wikilink]]` 注入回相关文章。
+
 ### 输出结构
 
 ```
 Wiki/
-├── _index.md              ← 所有文章的累积索引
-├── 科技/
-│   ├── 机器学习.md
-│   └── 神经网络.md
-└── 金融/
-    └── IPO流程.md
+├── Wiki/                      ← 按分类组织的生成文章
+│   ├── 机器学习/
+│   │   ├── Transformer.md
+│   │   └── 神经网络.md
+│   └── 金融/
+│       └── IPO流程.md
+├── Concepts/                  ← 自动生成的概念页面
+│   ├── 注意力机制.md
+│   └── 梯度下降.md
+├── raw/                       ← 原始源笔记（已归档）
+├── Queries/                   ← 保存的问答结果
+├── _index.md                  ← 文章累积索引
+├── _log.md                    ← 操作日志
+└── _lint-report.md            ← 最近一次健康检查报告
 ```
 
 每篇文章包含：
@@ -95,13 +135,16 @@ Wiki/
 - 带 `[[wikilinks]]` 的百科式正文
 - `## See Also` 双向链接区块
 
-### 处理标记
+---
 
-编译完成后，源笔记自动重命名：
-```
-我的笔记.md  →  我的笔记.wikied.md
-```
-对文件夹处理时，`.wikied.md` 文件会自动跳过。
+## 工作原理
+
+1. **生成** — 每篇源笔记发送给 LLM，生成包含标题、分类、正文和相关主题的结构化 Wiki 文章
+2. **链接** — 在所有新文章间注入双向 `[[wikilinks]]`，并添加 `## See Also` 区块
+3. **更新** — 通过 LLM 增量更新已有的相关 Wiki 文章，融入新知识
+4. **归档** — 源笔记移入 `raw/` 目录，防止重复处理
+5. **索引** — 更新 `_index.md`，按分类组织新条目
+6. **增强** — 若配置了 SearXNG，提取高频概念并通过网络搜索生成专属概念页面
 
 ---
 

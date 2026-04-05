@@ -73,3 +73,21 @@ export async function generateArticle(
     return { sourceFile, title: sourceFile, category: "General", content: raw, relatedTopics: [] };
   }
 }
+
+const UPDATE_PROMPT = `You are a wiki maintainer. A new article has been ingested. Update the existing wiki page to incorporate relevant new knowledge from the new article.
+
+Return ONLY the updated full markdown content of the existing page. Preserve all existing sections and [[wikilinks]]. Add or expand sections where the new article provides relevant information. Do not remove existing content.`;
+
+export async function updateExistingArticle(
+  existingContent: string,
+  existingTitle: string,
+  newArticleTitle: string,
+  newArticleContent: string,
+  client: LLMClient,
+  signal?: AbortSignal
+): Promise<string> {
+  const userMsg = `Existing page title: ${existingTitle}\n\nExisting content:\n${existingContent}\n\n---\n\nNew article title: ${newArticleTitle}\n\nNew article content:\n${newArticleContent}`;
+  const updated = await client.complete(UPDATE_PROMPT, userMsg, signal);
+  // Return updated content, or fall back to original if response looks empty
+  return updated.trim() || existingContent;
+}

@@ -1,11 +1,20 @@
 import { TFile, Vault } from "obsidian";
 import { PluginSettings } from "./settings";
 import { createLLMClient } from "./llm/client";
-import { generateArticle, WikiArticle } from "./wiki/generator";
+import { generateArticle, updateExistingArticle, WikiArticle } from "./wiki/generator";
 import { injectBidirectionalLinks } from "./wiki/linker";
 import { categoryPath, sanitizeFolderName } from "./wiki/classifier";
+import { extractAndEnrichConcepts } from "./wiki/concepts";
 
-const PROCESSED_SUFFIX = ".wikied";
+const RAW_FOLDER = "raw";
+const WIKI_SUBFOLDER = "Wiki";
+
+export interface ProcessResult {
+  articlesGenerated: number;
+  articlesUpdated: number;
+  conceptsGenerated: number;
+  errors: string[];
+}
 
 export async function processFiles(
   files: TFile[],
@@ -13,17 +22,18 @@ export async function processFiles(
   settings: PluginSettings,
   onProgress: (done: number, total: number, current: string) => void,
   signal: AbortSignal
-): Promise<void> {
+): Promise<ProcessResult> {
   const client = createLLMClient(settings);
   const results: WikiArticle[] = [];
+  const errors: string[] = [];
   let done = 0;
 
-  // Collect existing categories and titles from Wiki output folder
-  const existingCategories = getExistingCategories(vault, settings.outputFolder);
+  const wikiFolder = `${settings.outputFolder}/${WIKI_SUBFOLDER}`;
+  const existingCategories = getExistingCategories(vault, wikiFolder);
   const existingTitles = await getExistingTitles(vault, settings.outputFolder);
 
-  // Skip already-processed files
-  const pending = files.filter((f) => !f.basename.endsWith(PROCESSED_SUFFIX));
+  const rawPrefix = `${settings.outputFolder}/${RAW_FOLDER}/`;
+  const pending = files.filter((f) => !f.path.startsWith(rawPrefix));
 
   const semaphore = new Semaphore(settings.maxConcurrent);
   await Promise.all(
@@ -31,37 +41,59 @@ export async function processFiles(
       semaphore.run(async () => {
         if (signal.aborted) return;
         onProgress(done, pending.length, file.basename);
-        const content = await vault.read(file);
-        const article = await generateArticle(file.basename, content, client, settings, signal, existingCategories, existingTitles);
-        results.push({ ...article, sourceFile: file.path });
+        try {
+          const content = await vault.read(file);
+          const article = await generateArticle(file.basename, content, client, settings, signal, existingCategories, existingTitles);
+          results.push({ ...article, sourceFile: file.path });
 
-        // Rename source file to mark as processed
-        const newPath = file.path.replace(/\.md$/, `${PROCESSED_SUFFIX}.md`);
-        await vault.rename(file, newPath);
-
+          const rawFolder = `${settings.outputFolder}/${RAW_FOLDER}`;
+          await ensureFolder(vault, rawFolder);
+          const rawPath = `${rawFolder}/${file.name}`;
+          await vault.rename(file, rawPath);
+        } catch (e) {
+          errors.push(`${file.basename}: ${(e as Error).message}`);
+        }
         done++;
         onProgress(done, pending.length, file.basename);
       })
     )
   );
 
-  if (signal.aborted) return;
+  if (signal.aborted) return { articlesGenerated: 0, articlesUpdated: 0, conceptsGenerated: 0, errors };
 
   const linked = injectBidirectionalLinks(results);
   await writeArticles(linked, vault, settings);
-  // Update existing related articles with backlinks to new articles
-  await updateExistingBacklinks(linked, vault, settings.outputFolder);
+
+  let articlesUpdated = 0;
+  try {
+    articlesUpdated = await incrementallyUpdateRelated(linked, vault, settings.outputFolder, client, signal);
+  } catch (e) {
+    errors.push(`Incremental update: ${(e as Error).message}`);
+  }
+
+  await appendLog(vault, settings.outputFolder, "ingest", linked.map((a) => a.title));
+
+  let conceptsGenerated = 0;
+  try {
+    conceptsGenerated = await extractAndEnrichConcepts(linked, vault, settings.outputFolder, client, settings.searxngBaseUrl, settings.searxngToken, settings.outputLanguage, signal);
+  } catch (e) {
+    console.error("[WikiCompiler] Concept extraction error:", e);
+    errors.push(`Concept extraction: ${(e as Error).message}`);
+  }
+
+  return { articlesGenerated: linked.length, articlesUpdated, conceptsGenerated, errors };
 }
 
 async function writeArticles(articles: WikiArticle[], vault: Vault, settings: PluginSettings): Promise<void> {
-  // Ensure output root exists
+  const wikiFolder = `${settings.outputFolder}/${WIKI_SUBFOLDER}`;
   await ensureFolder(vault, settings.outputFolder);
+  await ensureFolder(vault, wikiFolder);
 
   // Track used filenames to avoid collisions
   const usedPaths = new Set<string>();
 
   for (const article of articles) {
-    const catPath = categoryPath(settings.outputFolder, article.category);
+    const catPath = categoryPath(wikiFolder, article.category);
     await ensureFolder(vault, catPath);
 
     const baseName = sanitizeFolderName(article.title) || "Untitled";
@@ -83,11 +115,10 @@ async function writeArticles(articles: WikiArticle[], vault: Vault, settings: Pl
     }
   }
 
-  await writeIndex(articles, vault, settings.outputFolder);
+  await writeIndex(articles, vault, settings.outputFolder, wikiFolder);
 }
 
-async function writeIndex(articles: WikiArticle[], vault: Vault, outputFolder: string): Promise<void> {
-  // Load existing index entries
+async function writeIndex(articles: WikiArticle[], vault: Vault, outputFolder: string, wikiFolder: string): Promise<void> {
   const indexPath = `${outputFolder}/_index.md`;
   const existingFile = vault.getAbstractFileByPath(indexPath);
   const existingEntries = new Map<string, Set<string>>(); // category → set of "[[title]]"
@@ -142,10 +173,16 @@ async function getExistingTitles(vault: Vault, outputFolder: string): Promise<st
   return titles;
 }
 
-async function updateExistingBacklinks(newArticles: WikiArticle[], vault: Vault, outputFolder: string): Promise<void> {
-  // Build map: existing file title → file path
+async function incrementallyUpdateRelated(
+  newArticles: WikiArticle[],
+  vault: Vault,
+  outputFolder: string,
+  client: ReturnType<typeof createLLMClient>,
+  signal: AbortSignal
+): Promise<number> {
   const folder = vault.getAbstractFileByPath(outputFolder);
-  if (!folder || !("children" in folder)) return;
+  if (!folder || !("children" in folder)) return 0;
+
   const fileMap = new Map<string, TFile>();
   const walk = (f: any) => {
     for (const child of f.children) {
@@ -156,21 +193,21 @@ async function updateExistingBacklinks(newArticles: WikiArticle[], vault: Vault,
   };
   walk(folder);
 
+  let updated = 0;
   for (const newArt of newArticles) {
     for (const related of newArt.relatedTopics) {
+      if (signal.aborted) return updated;
       const existingFile = fileMap.get(related.toLowerCase());
       if (!existingFile) continue;
-      let text = await vault.read(existingFile);
-      const backlink = `- [[${newArt.title}]]`;
-      if (text.includes(backlink)) continue;
-      if (text.includes("## See Also")) {
-        text = text.replace("## See Also", `## See Also\n${backlink}`);
-      } else {
-        text += `\n\n## See Also\n${backlink}`;
+      const existingContent = await vault.read(existingFile);
+      const newContent = await updateExistingArticle(existingContent, existingFile.basename, newArt.title, newArt.content, client, signal);
+      if (newContent !== existingContent) {
+        await vault.modify(existingFile, newContent);
+        updated++;
       }
-      await vault.modify(existingFile, text);
     }
   }
+  return updated;
 }
 
 function getExistingCategories(vault: Vault, outputFolder: string): string[] {  const folder = vault.getAbstractFileByPath(outputFolder);
@@ -179,6 +216,19 @@ function getExistingCategories(vault: Vault, outputFolder: string): string[] {  
     .filter((c: any) => "children" in c)
     .map((c: any) => c.name)
     .filter((name: string) => name !== "_index");
+}
+
+export async function appendLog(vault: Vault, outputFolder: string, operation: string, items: string[]): Promise<void> {
+  const logPath = `${outputFolder}/_log.md`;
+  const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+  const entry = `- ${timestamp} **${operation}**: ${items.map((t) => `[[${t}]]`).join(", ")}\n`;
+  const existing = vault.getAbstractFileByPath(logPath);
+  if (existing instanceof TFile) {
+    const text = await vault.read(existing);
+    await vault.modify(existing, text + entry);
+  } else {
+    await vault.create(logPath, `# Wiki Activity Log\n\n${entry}`);
+  }
 }
 
 class Semaphore {

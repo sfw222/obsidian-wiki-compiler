@@ -2,7 +2,7 @@
 
 > Inspired by [Andrej Karpathy's LLM Knowledge Bases](https://x.com/karpathy/status/2039805659525644595) concept.
 
-Transform your Obsidian notes into a structured, interconnected Wiki using LLMs. Select a note or folder, and the plugin compiles encyclopedic articles with bidirectional `[[wikilinks]]`, auto-categorized into subdirectories.
+Transform your Obsidian notes into a structured, interconnected Wiki using LLMs. Select a note or folder, and the plugin compiles encyclopedic articles with bidirectional `[[wikilinks]]`, auto-categorized into subdirectories. It also extracts key concepts via web search and enriches your knowledge base automatically.
 
 [中文文档](README.zh-CN.md)
 
@@ -11,10 +11,16 @@ Transform your Obsidian notes into a structured, interconnected Wiki using LLMs.
 ## Features
 
 - **One-click compilation** — right-click any note or folder → "Compile to Wiki"
+- **Recursive folder processing** — processes all `.md` files in subdirectories
 - **Smart categorization** — LLM assigns domain categories; reuses existing categories before creating new ones
-- **Bidirectional wikilinks** — new articles link to existing ones, and existing articles get backlinks updated automatically
-- **Processed file marking** — source notes renamed with `.wikied` suffix to avoid reprocessing
+- **Bidirectional wikilinks** — new articles link to existing ones, and existing articles are incrementally updated with relevant new knowledge
+- **Concept extraction** — automatically extracts high-frequency concepts across articles, enriches them via SearXNG web search, and generates dedicated concept pages
+- **Wiki query** — ask questions about your wiki and get answers with `[[citations]]`, optionally saved as query notes
+- **Wiki lint** — health check that finds contradictions, orphan pages, missing concepts, and stale content
+- **Source archival** — processed notes are moved to `raw/` folder to avoid reprocessing
 - **Cumulative index** — `_index.md` merges all articles across sessions, organized by category
+- **Activity log** — `_log.md` tracks all operations (ingest, query, lint, concept extraction)
+- **Progress UI** — real-time progress modal with cancel support
 - **Multi-provider LLM support** — OpenAI, Anthropic (Claude), Ollama (local), or any custom third-party API
 
 ---
@@ -54,6 +60,8 @@ Open **Settings → Wiki Compiler**:
 | Output Folder | Where Wiki articles are saved | `Wiki` |
 | Output Language | auto / zh / en / ja | auto |
 | Max Concurrent | Parallel requests (1–10) | 3 |
+| SearXNG Base URL | URL of your SearXNG instance for concept enrichment | — |
+| SearXNG Token | Optional Bearer token for authenticated SearXNG | — |
 
 ### Custom (third-party) provider
 
@@ -78,16 +86,48 @@ Right-click any folder → **Compile folder to Wiki**
 
 Or use the command palette: `Wiki Compiler: Process folder (enter path)`
 
+All `.md` files in subdirectories are included recursively.
+
+### Query your Wiki
+
+Command palette: `Wiki Compiler: Query Wiki`
+
+A modal opens where you can ask questions. The LLM answers based on your wiki content with `[[wikilink]]` citations. Click **Save to Wiki** to persist the Q&A as a note in `Wiki/Queries/`.
+
+### Lint (health check)
+
+Command palette: `Wiki Compiler: Lint Wiki (health check)`
+
+Generates `_lint-report.md` covering:
+- Contradictions between pages
+- Orphan pages with no incoming links
+- Missing concepts that deserve their own page
+- Stale or outdated content
+
+### Extract concepts
+
+Command palette: `Wiki Compiler: Extract Concepts (retry SearXNG)`
+
+Manually triggers concept extraction. Requires SearXNG to be configured. The plugin identifies high-frequency concepts across articles, searches the web for authoritative information, and generates dedicated concept pages with `[[wikilinks]]` injected back into related articles.
+
 ### Output structure
 
 ```
 Wiki/
-├── _index.md              ← cumulative index of all articles
-├── Technology/
-│   ├── Machine Learning.md
-│   └── Neural Networks.md
-└── Finance/
-    └── IPO Process.md
+├── Wiki/                      ← generated articles by category
+│   ├── Machine Learning/
+│   │   ├── Transformer.md
+│   │   └── Neural Networks.md
+│   └── Finance/
+│       └── IPO Process.md
+├── Concepts/                  ← auto-generated concept pages
+│   ├── Attention Mechanism.md
+│   └── Gradient Descent.md
+├── raw/                       ← original source notes (archived)
+├── Queries/                   ← saved query results
+├── _index.md                  ← cumulative article index
+├── _log.md                    ← activity log
+└── _lint-report.md            ← latest lint report
 ```
 
 Each article includes:
@@ -95,13 +135,16 @@ Each article includes:
 - Encyclopedic content with `[[wikilinks]]`
 - `## See Also` section with bidirectional links
 
-### Processed notes
+---
 
-After compilation, source notes are renamed:
-```
-My Note.md  →  My Note.wikied.md
-```
-Folder processing automatically skips `.wikied.md` files.
+## How it works
+
+1. **Generate** — Each source note is sent to the LLM, which produces a structured wiki article with title, category, content, and related topics
+2. **Link** — Bidirectional `[[wikilinks]]` are injected across all new articles, and a `## See Also` section is added
+3. **Update** — Existing wiki articles mentioned in related topics are incrementally updated via LLM to incorporate new knowledge
+4. **Archive** — Source notes are moved to `raw/` to prevent reprocessing
+5. **Index** — `_index.md` is updated with new entries, organized by category
+6. **Enrich** — If SearXNG is configured, high-frequency concepts are extracted, searched on the web, and turned into dedicated concept pages
 
 ---
 

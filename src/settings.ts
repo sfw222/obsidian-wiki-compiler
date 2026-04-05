@@ -11,6 +11,8 @@ export interface PluginSettings {
   outputFolder: string;
   outputLanguage: string;
   maxConcurrent: number;
+  searxngBaseUrl: string;
+  searxngToken: string;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -23,6 +25,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   outputFolder: "Wiki",
   outputLanguage: "auto",
   maxConcurrent: 3,
+  searxngBaseUrl: "",
+  searxngToken: "",
 };
 
 const PROVIDER_MODELS: Record<string, string> = {
@@ -161,6 +165,26 @@ export class WikiCompilerSettingTab extends PluginSettingTab {
             this.plugin.settings.maxConcurrent = v;
             await this.plugin.saveSettings();
           })
+      );
+
+    new Setting(containerEl)
+      .setName("SearXNG Base URL")
+      .setDesc("URL of your SearXNG instance for concept enrichment (e.g. http://localhost:8080). Leave empty to skip.")
+      .addText((t) =>
+        t.setPlaceholder("http://localhost:8080").setValue(this.plugin.settings.searxngBaseUrl).onChange(async (v) => {
+          this.plugin.settings.searxngBaseUrl = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("SearXNG Token")
+      .setDesc("Optional Bearer token for authenticated SearXNG instances.")
+      .addText((t) =>
+        t.setPlaceholder("token...").setValue(this.plugin.settings.searxngToken).onChange(async (v) => {
+          this.plugin.settings.searxngToken = v;
+          await this.plugin.saveSettings();
+        })
       );
   }
 }

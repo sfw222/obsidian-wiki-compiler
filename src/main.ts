@@ -1,7 +1,12 @@
 import { App, Notice, Plugin, TFile, TFolder, Menu } from "obsidian";
 import { DEFAULT_SETTINGS, PluginSettings, WikiCompilerSettingTab } from "./settings";
-import { processFiles } from "./processor";
+import { processFiles, appendLog, ProcessResult } from "./processor";
 import { ProgressModal } from "./ui/ProgressModal";
+import { QueryModal } from "./ui/QueryModal";
+import { createLLMClient } from "./llm/client";
+import { queryWiki } from "./wiki/query";
+import { lintWiki } from "./wiki/lint";
+import { extractAndEnrichConcepts, loadWikiArticlesFromVault } from "./wiki/concepts";
 
 export default class WikiCompilerPlugin extends Plugin {
   settings: PluginSettings;
@@ -9,6 +14,33 @@ export default class WikiCompilerPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new WikiCompilerSettingTab(this.app, this));
+
+    // Command: query wiki
+    this.addCommand({
+      id: "query-wiki",
+      name: "Query Wiki",
+      callback: () => {
+        new QueryModal(
+          this.app,
+          (question) => this.runQuery(question),
+          (question, answer) => this.saveQueryResult(question, answer)
+        ).open();
+      },
+    });
+
+    // Command: lint wiki
+    this.addCommand({
+      id: "lint-wiki",
+      name: "Lint Wiki (health check)",
+      callback: () => this.runLint(),
+    });
+
+    // Command: extract concepts (manual retry)
+    this.addCommand({
+      id: "extract-concepts",
+      name: "Extract Concepts (retry SearXNG)",
+      callback: () => this.runExtractConcepts(),
+    });
 
     // Command: process active file
     this.addCommand({
@@ -54,6 +86,121 @@ export default class WikiCompilerPlugin extends Plugin {
     );
   }
 
+  async runQuery(question: string): Promise<string> {
+    if (!this.settings.apiKey && this.settings.llmProvider !== "ollama") {
+      throw new Error("Please set your API key in settings.");
+    }
+    const wikiContext = await this.loadWikiContext();
+    const client = createLLMClient(this.settings);
+    return queryWiki(question, wikiContext, client);
+  }
+
+  async saveQueryResult(question: string, answer: string): Promise<void> {
+    const folder = `${this.settings.outputFolder}/Queries`;
+    if (!this.app.vault.getAbstractFileByPath(folder)) {
+      await this.app.vault.createFolder(folder);
+    }
+    const date = new Date().toISOString().slice(0, 10);
+    const safeName = question.slice(0, 40).replace(/[\\/:*?"<>|]/g, "").trim();
+    const path = `${folder}/${date}-${safeName}.md`;
+    const content = `# ${question}\n\n${answer}`;
+    const existing = this.app.vault.getAbstractFileByPath(path);
+    if (existing instanceof TFile) {
+      await this.app.vault.modify(existing, content);
+    } else {
+      await this.app.vault.create(path, content);
+    }
+    new Notice(`Query saved to ${path}`);
+    await appendLog(this.app.vault, this.settings.outputFolder, "query", [question]);
+  }
+
+  async runLint(): Promise<void> {
+    if (!this.settings.apiKey && this.settings.llmProvider !== "ollama") {
+      new Notice("Wiki Compiler: Please set your API key in settings.");
+      return;
+    }
+    new Notice("Wiki Compiler: Running lint...");
+    try {
+      const wikiContext = await this.loadWikiContext();
+      const client = createLLMClient(this.settings);
+      const report = await lintWiki(wikiContext, client);
+      const reportPath = `${this.settings.outputFolder}/_lint-report.md`;
+      const existing = this.app.vault.getAbstractFileByPath(reportPath);
+      const content = `---\ngenerated: ${new Date().toISOString().slice(0, 10)}\n---\n\n# Wiki Lint Report\n\n${report}`;
+      if (existing instanceof TFile) {
+        await this.app.vault.modify(existing, content);
+      } else {
+        await this.app.vault.create(reportPath, content);
+      }
+      new Notice("Wiki Compiler: Lint complete. See _lint-report.md");
+      await appendLog(this.app.vault, this.settings.outputFolder, "lint", ["_lint-report"]);
+    } catch (e) {
+      new Notice(`Wiki Compiler lint error: ${(e as Error).message}`);
+    }
+  }
+
+  async runExtractConcepts(): Promise<void> {
+    if (!this.settings.searxngBaseUrl) {
+      new Notice("Wiki Compiler: Please set SearXNG Base URL in settings.");
+      return;
+    }
+    if (!this.settings.apiKey && this.settings.llmProvider !== "ollama") {
+      new Notice("Wiki Compiler: Please set your API key in settings.");
+      return;
+    }
+    new Notice("Wiki Compiler: Extracting concepts...");
+    try {
+      const articles = await loadWikiArticlesFromVault(this.app.vault, this.settings.outputFolder);
+      if (articles.length === 0) {
+        new Notice("Wiki Compiler: No wiki articles found.");
+        return;
+      }
+      const client = createLLMClient(this.settings);
+      const controller = new AbortController();
+      await extractAndEnrichConcepts(articles, this.app.vault, this.settings.outputFolder, client, this.settings.searxngBaseUrl, this.settings.searxngToken, this.settings.outputLanguage, controller.signal);
+      await appendLog(this.app.vault, this.settings.outputFolder, "extract-concepts", []);
+      new Notice("Wiki Compiler: Concept extraction complete.");
+    } catch (e) {
+      new Notice(`Wiki Compiler concept error: ${(e as Error).message}`);
+    }
+  }
+
+  private async loadWikiContext(): Promise<string> {
+    const indexPath = `${this.settings.outputFolder}/_index.md`;
+    const indexFile = this.app.vault.getAbstractFileByPath(indexPath);
+    if (!(indexFile instanceof TFile)) return "No wiki index found.";
+    const index = await this.app.vault.read(indexFile);
+    // Extract linked titles from index and load up to 20 pages
+    const titles = [...index.matchAll(/\[\[(.+?)\]\]/g)].map((m) => m[1]).slice(0, 20);
+    const pages: string[] = [`## Index\n${index}`];
+    for (const title of titles) {
+      const folder = this.app.vault.getAbstractFileByPath(this.settings.outputFolder);
+      if (!folder || !("children" in folder)) continue;
+      const file = this.findFileByTitle(title);
+      if (file) {
+        const text = await this.app.vault.read(file);
+        pages.push(`## ${title}\n${text}`);
+      }
+    }
+    return pages.join("\n\n---\n\n");
+  }
+
+  private findFileByTitle(title: string): TFile | null {
+    const folder = this.app.vault.getAbstractFileByPath(this.settings.outputFolder);
+    if (!folder || !("children" in folder)) return null;
+    let found: TFile | null = null;
+    const walk = (f: any) => {
+      for (const child of f.children) {
+        if (child instanceof TFile && child.basename.toLowerCase() === title.toLowerCase()) {
+          found = child;
+          return;
+        } else if ("children" in child) walk(child);
+      }
+    };
+    walk(folder);
+    return found;
+  }
+
   async runOnFiles(files: TFile[]) {
     if (files.length === 0) {
       new Notice("No markdown files found.");
@@ -68,7 +215,7 @@ export default class WikiCompilerPlugin extends Plugin {
     modal.open();
 
     try {
-      await processFiles(
+      const result = await processFiles(
         files,
         this.app.vault,
         this.settings,
@@ -76,7 +223,13 @@ export default class WikiCompilerPlugin extends Plugin {
         modal.signal
       );
       modal.close();
-      new Notice(`Wiki Compiler: Done! ${files.length} note(s) compiled to "${this.settings.outputFolder}".`);
+      const lines = [
+        `✓ ${result.articlesGenerated} article(s) generated`,
+        result.articlesUpdated > 0 ? `✓ ${result.articlesUpdated} article(s) updated` : null,
+        result.conceptsGenerated > 0 ? `✓ ${result.conceptsGenerated} concept(s) created` : null,
+        result.errors.length > 0 ? `⚠ ${result.errors.length} error(s): ${result.errors.join("; ")}` : null,
+      ].filter(Boolean).join("\n");
+      new Notice(`Wiki Compiler\n${lines}`, 8000);
     } catch (e) {
       modal.close();
       if ((e as Error).name !== "AbortError") {
