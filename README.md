@@ -15,12 +15,14 @@ Transform your Obsidian notes into a structured, interconnected Wiki using LLMs.
 - **Smart categorization** — LLM assigns articles to your custom category list; falls back to the last entry if no match
 - **Customizable categories** — define your own category list in Settings; auto-updates when you switch output language
 - **Bidirectional wikilinks** — new articles link to existing ones, and existing articles are incrementally updated with relevant new knowledge
-- **Concept extraction** — automatically extracts high-frequency concepts across articles, enriches them via SearXNG web search, generates dedicated concept pages, and injects bidirectional links after all pages are created
+- **Concept extraction** — automatically extracts high-frequency concepts across articles, enriches them via SearXNG web search, generates dedicated concept pages, and injects bidirectional links after all pages are created; already-existing concept pages are skipped via code-side filtering (no extra LLM tokens)
+- **Concept page refresh** — re-search all existing concept pages using context derived from which wiki articles mention each concept, enabling automatic disambiguation; useful for improving pages that were generated without sufficient domain context
+- **Patch attachments** — retroactively finds attachment references (`![[...]]`) in archived raw notes and appends them to the corresponding wiki articles; does not require LLM
 - **Wiki query** — ask questions about your wiki and get answers with academic-style numbered citations `[1][2]`; click citation numbers to jump to references; copy answer to clipboard; results saved as query notes
 - **Wiki lint** — health check that finds contradictions, orphan pages, missing concepts, and stale content
 - **Source archival** — processed notes are moved to `raw/` folder to avoid reprocessing
 - **Cumulative index** — `_index.md` merges all articles across sessions, organized by category
-- **Activity log** — `_log.md` tracks all operations (ingest, query, lint, concept extraction)
+- **Activity log** — `_log.md` tracks all operations (ingest, query, lint, concept extraction); detailed per-run logs with step-by-step timing are saved to `_runs/`
 - **Progress UI** — real-time progress modal with cancel support
 - **Multi-provider LLM support** — OpenAI, Anthropic (Claude), Ollama (local), or any custom third-party API
 
@@ -106,6 +108,18 @@ Generates `_lint-report.md` covering:
 - Missing concepts that deserve their own page
 - Stale or outdated content
 
+### Refresh concept pages
+
+Command palette: `Wiki Compiler: Refresh Concept Pages (re-search with wiki context)`
+
+Re-searches all existing concept pages. For each concept, the plugin finds which wiki articles mention it and uses their titles as a domain context hint when querying SearXNG — automatically disambiguating concepts that share names across unrelated fields. Does not require LLM.
+
+### Patch attachments from raw
+
+Command palette: `Wiki Compiler: Patch attachments from raw (no LLM)`
+
+Retroactively adds attachment references found in archived raw notes to their corresponding wiki articles. Run this if attachments were missed during initial processing. Does not require LLM.
+
 ### Extract concepts
 
 Command palette: `Wiki Compiler: Extract Concepts (retry SearXNG)`
@@ -127,6 +141,7 @@ Wiki/
 │   └── Gradient Descent.md
 ├── raw/                       ← original source notes (archived)
 ├── Queries/                   ← saved query results
+├── _runs/                     ← per-run detailed logs (timestamped)
 ├── _index.md                  ← cumulative article index
 ├── _log.md                    ← activity log
 └── _lint-report.md            ← latest lint report
@@ -136,6 +151,7 @@ Each article includes:
 - Frontmatter: `source`, `category`, `generated`
 - Encyclopedic content with `[[wikilinks]]`
 - `## See Also` section with bidirectional links
+- `## Attachments` section (when the source note contained embedded files)
 
 ---
 
@@ -146,7 +162,8 @@ Each article includes:
 3. **Update** — Existing wiki articles mentioned in related topics are incrementally updated via LLM to incorporate new knowledge
 4. **Archive** — Source notes are moved to `raw/` to prevent reprocessing
 5. **Index** — `_index.md` is updated with new entries, organized by category
-6. **Enrich** — If SearXNG is configured, high-frequency concepts are extracted, searched on the web, and turned into dedicated concept pages
+6. **Enrich** — If SearXNG is configured, high-frequency concepts are extracted, searched on the web, and turned into dedicated concept pages; already-existing concepts are skipped automatically
+7. **Log** — A timestamped run log is saved to `_runs/` with per-step details for every compilation run
 
 ---
 
