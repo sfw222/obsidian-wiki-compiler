@@ -23,7 +23,11 @@ export class ProgressModal extends Modal {
   }
 
   update(done: number, total: number, current: string) {
-    this.statusEl.setText(`Processing ${done}/${total}: "${current}"...`);
+    if (done >= total && total > 0) {
+      this.statusEl.setText(`${current}...`);
+    } else {
+      this.statusEl.setText(`Processing ${done + 1}/${total}: "${current}"...`);
+    }
   }
 
   onClose() {

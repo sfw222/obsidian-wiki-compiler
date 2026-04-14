@@ -47,7 +47,7 @@ export async function generateArticle(
   const fallback = getFallbackCategory(settings.outputLanguage === "auto" ? "en" : settings.outputLanguage);
   const categories = settings.categories.length > 0 ? settings.categories : [fallback];
   const existingHint = existingTitles.length > 0
-    ? `\nExisting wiki articles: ${existingTitles.join(", ")}`
+    ? `\nExisting wiki articles: ${existingTitles.slice(0, 80).join(", ")}`
     : "";
   const systemPrompt = SYSTEM_PROMPT
     .replace("{LANGUAGE}", languageInstruction(settings.outputLanguage))
