@@ -224,6 +224,32 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Extract the first sentence in `content` that mentions `conceptName`.
+ * Strips markdown syntax and returns up to 120 chars, or "" if not found.
+ */
+function extractMentionSnippet(content: string, conceptName: string): string {
+  const regex = new RegExp(escapeRegex(conceptName), "i");
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (
+      trimmed.length > 30 &&
+      !trimmed.startsWith("#") &&
+      !trimmed.startsWith("---") &&
+      !trimmed.startsWith("source:") &&
+      !trimmed.startsWith("category:") &&
+      !trimmed.startsWith("generated:") &&
+      regex.test(trimmed)
+    ) {
+      return trimmed
+        .replace(/\*\*|__|`|\[\[|\]\]/g, "")
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+        .slice(0, 120);
+    }
+  }
+  return "";
+}
+
 export async function refreshConceptPages(
   vault: Vault,
   outputFolder: string,
@@ -255,7 +281,13 @@ export async function refreshConceptPages(
       const plainText = new RegExp(`(?<![\\u4e00-\\u9fa5\\w])${escapeRegex(conceptName)}(?![\\u4e00-\\u9fa5\\w])`, "i");
       return wikiLink.test(a.content) || plainText.test(a.content);
     });
-    const context = mentioning.slice(0, 3).map((a) => a.title).join(" ");
+    const snippets = mentioning
+      .slice(0, 3)
+      .map((a) => extractMentionSnippet(a.content, conceptName))
+      .filter(Boolean);
+    const context = snippets.length > 0
+      ? snippets.join(" ").slice(0, 200)
+      : mentioning.slice(0, 3).map((a) => a.title).join(" ");
     log(`Refreshing "${conceptName}" (context: "${context || "none"}")`);
 
     let searchResult: { body: string; sources: string } | null = null;
