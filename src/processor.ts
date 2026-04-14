@@ -261,7 +261,7 @@ export async function appendLog(vault: Vault, outputFolder: string, operation: s
   }
 }
 
-async function writeRunLog(vault: Vault, outputFolder: string, runStart: Date, lines: string[]): Promise<void> {
+export async function writeRunLog(vault: Vault, outputFolder: string, runStart: Date, lines: string[]): Promise<void> {
   const stamp = runStart.toISOString().slice(0, 19).replace("T", "T").replace(/:/g, "-");
   const logsFolder = `${outputFolder}/_runs`;
   await ensureFolder(vault, logsFolder);

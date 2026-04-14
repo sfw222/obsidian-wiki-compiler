@@ -1,6 +1,6 @@
 import { App, Notice, Plugin, TFile, TFolder, Menu } from "obsidian";
 import { DEFAULT_SETTINGS, PluginSettings, WikiCompilerSettingTab } from "./settings";
-import { processFiles, appendLog, patchAttachmentsFromRaw, ProcessResult } from "./processor";
+import { processFiles, appendLog, patchAttachmentsFromRaw, writeRunLog, ProcessResult } from "./processor";
 import { ProgressModal } from "./ui/ProgressModal";
 import { ResultModal } from "./ui/ResultModal";
 import { QueryModal } from "./ui/QueryModal";
@@ -160,6 +160,13 @@ export default class WikiCompilerPlugin extends Plugin {
       return;
     }
     new Notice("Wiki Compiler: Refreshing concept pages...");
+    const runStart = new Date();
+    const runLog: string[] = [];
+    const log = (msg: string) => {
+      const ts = new Date().toISOString().slice(11, 19);
+      runLog.push(`- \`${ts}\` ${msg}`);
+      console.log(`[WikiCompiler] ${msg}`);
+    };
     try {
       const controller = new AbortController();
       const count = await refreshConceptPages(
@@ -167,8 +174,11 @@ export default class WikiCompilerPlugin extends Plugin {
         this.settings.outputFolder,
         this.settings.searxngBaseUrl,
         this.settings.searxngToken,
-        controller.signal
+        controller.signal,
+        log
       );
+      log(`Refresh finished. Concepts refreshed: ${count}`);
+      await writeRunLog(this.app.vault, this.settings.outputFolder, runStart, runLog);
       await appendLog(this.app.vault, this.settings.outputFolder, "refresh-concepts", []);
       new Notice(`Wiki Compiler: Refreshed ${count} concept page(s).`);
     } catch (e) {
