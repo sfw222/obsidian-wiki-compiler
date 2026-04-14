@@ -1,13 +1,13 @@
 import { App, Notice, Plugin, TFile, TFolder, Menu } from "obsidian";
 import { DEFAULT_SETTINGS, PluginSettings, WikiCompilerSettingTab } from "./settings";
-import { processFiles, appendLog, ProcessResult } from "./processor";
+import { processFiles, appendLog, patchAttachmentsFromRaw, ProcessResult } from "./processor";
 import { ProgressModal } from "./ui/ProgressModal";
 import { ResultModal } from "./ui/ResultModal";
 import { QueryModal } from "./ui/QueryModal";
 import { createLLMClient } from "./llm/client";
 import { queryWiki } from "./wiki/query";
 import { lintWiki } from "./wiki/lint";
-import { extractAndEnrichConcepts, loadWikiArticlesFromVault } from "./wiki/concepts";
+import { extractAndEnrichConcepts, loadWikiArticlesFromVault, refreshConceptPages } from "./wiki/concepts";
 
 export default class WikiCompilerPlugin extends Plugin {
   settings: PluginSettings;
@@ -41,6 +41,20 @@ export default class WikiCompilerPlugin extends Plugin {
       id: "extract-concepts",
       name: "Extract Concepts (retry SearXNG)",
       callback: () => this.runExtractConcepts(),
+    });
+
+    // Command: refresh existing concept pages with wiki context
+    this.addCommand({
+      id: "refresh-concepts",
+      name: "Refresh Concept Pages (re-search with wiki context)",
+      callback: () => this.runRefreshConcepts(),
+    });
+
+    // Command: patch attachments from raw
+    this.addCommand({
+      id: "patch-attachments",
+      name: "Patch attachments from raw (no LLM)",
+      callback: () => this.runPatchAttachments(),
     });
 
     // Command: process active file
@@ -140,6 +154,28 @@ export default class WikiCompilerPlugin extends Plugin {
     }
   }
 
+  async runRefreshConcepts(): Promise<void> {
+    if (!this.settings.searxngBaseUrl) {
+      new Notice("Wiki Compiler: Please set SearXNG Base URL in settings.");
+      return;
+    }
+    new Notice("Wiki Compiler: Refreshing concept pages...");
+    try {
+      const controller = new AbortController();
+      const count = await refreshConceptPages(
+        this.app.vault,
+        this.settings.outputFolder,
+        this.settings.searxngBaseUrl,
+        this.settings.searxngToken,
+        controller.signal
+      );
+      await appendLog(this.app.vault, this.settings.outputFolder, "refresh-concepts", []);
+      new Notice(`Wiki Compiler: Refreshed ${count} concept page(s).`);
+    } catch (e) {
+      new Notice(`Wiki Compiler refresh error: ${(e as Error).message}`);
+    }
+  }
+
   async runExtractConcepts(): Promise<void> {
     if (!this.settings.searxngBaseUrl) {
       new Notice("Wiki Compiler: Please set SearXNG Base URL in settings.");
@@ -200,6 +236,15 @@ export default class WikiCompilerPlugin extends Plugin {
     };
     walk(folder);
     return found;
+  }
+
+  async runPatchAttachments() {
+    try {
+      const count = await patchAttachmentsFromRaw(this.app.vault, this.settings.outputFolder);
+      new Notice(`Wiki Compiler: Patched ${count} article(s) with attachment refs.`);
+    } catch (e) {
+      new Notice(`Wiki Compiler patch error: ${(e as Error).message}`);
+    }
   }
 
   async runOnFiles(files: TFile[]) {
