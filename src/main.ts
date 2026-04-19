@@ -169,9 +169,11 @@ export default class WikiCompilerPlugin extends Plugin {
     };
     try {
       const controller = new AbortController();
+      const client = createLLMClient(this.settings);
       const count = await refreshConceptPages(
         this.app.vault,
         this.settings.outputFolder,
+        client,
         this.settings.searxngBaseUrl,
         this.settings.searxngToken,
         controller.signal,
