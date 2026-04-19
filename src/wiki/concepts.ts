@@ -222,57 +222,41 @@ export async function extractAndEnrichConcepts(
 
   let created = 0;
   const skipped: string[] = [];
+  const CONCURRENCY = 3;
 
-  for (const entry of conceptEntries) {
-    if (signal?.aborted) return created;
+  const processConcept = async (entry: { concept: string; context: string }) => {
+    if (signal?.aborted) return;
     const { concept, context } = entry;
 
-    // 1. Fetch raw candidates from SearXNG
     let rawResults: Array<{ title: string; content: string; url: string }> = [];
     try {
       rawResults = await searchSearXNG(concept, context, searxngBaseUrl, searxngToken);
     } catch (e) {
       console.warn(`[WikiCompiler] SearXNG "${concept}" failed:`, (e as Error).message);
     }
-    await new Promise((r) => setTimeout(r, 1500));
 
     if (rawResults.length === 0) {
       log(`SearXNG "${concept}": no results`);
       skipped.push(concept);
-      continue;
+      return;
     }
 
-    // 2. Filter by relevance using LLM
-    //    articleContext for new concepts comes from the LLM-extracted `context` field
-    const filtered = await filterResultsByRelevance(
-      concept,
-      context,
-      rawResults,
-      client,
-      signal
-    );
-    log(
-      `SearXNG "${concept}": ${rawResults.length} raw → ${filtered.length} relevant`
-    );
+    const filtered = await filterResultsByRelevance(concept, context, rawResults, client, signal);
+    log(`SearXNG "${concept}": ${rawResults.length} raw → ${filtered.length} relevant`);
 
     const { body, sources } = buildSearchBody(filtered);
     const sourcesSection = sources ? `\n\n## 来源\n\n${sources}` : "";
     const newContent = `## Overview\n\n${body}${sourcesSection}`;
 
-    // 3. Write to vault, persisting search_context in frontmatter
     const existingFile = vaultFileMap.get(concept.toLowerCase());
     if (existingFile) {
       const existingContent = await vault.read(existingFile);
       if (!existingContent.includes(body.slice(0, 80))) {
-        await vault.modify(
-          existingFile,
-          existingContent + `\n\n---\n\n${body}${sourcesSection}`
-        );
+        await vault.modify(existingFile, existingContent + `\n\n---\n\n${body}${sourcesSection}`);
       }
     } else {
       const safeConceptName = concept.replace(/[\\/:*?"<>|]/g, "-").trim();
       const filePath = `${conceptFolder}/${safeConceptName}.md`;
-      // Persist search_context so refreshConceptPages can reuse it
       const frontmatter =
         `---\ntype: concept\ngenerated: ${new Date().toISOString().slice(0, 10)}` +
         (context ? `\nsearch_context: "${context}"` : "") +
@@ -281,6 +265,12 @@ export async function extractAndEnrichConcepts(
       log(`Created concept page: "${concept}"`);
     }
     created++;
+  };
+
+  for (let i = 0; i < conceptEntries.length; i += CONCURRENCY) {
+    if (signal?.aborted) break;
+    await Promise.all(conceptEntries.slice(i, i + CONCURRENCY).map(processConcept));
+    if (i + CONCURRENCY < conceptEntries.length) await new Promise((r) => setTimeout(r, 800));
   }
 
   if (skipped.length > 0) {
@@ -323,54 +313,40 @@ export async function refreshConceptPages(
   ) as TFile[];
 
   let refreshed = 0;
-  for (const file of conceptFiles) {
-    if (signal?.aborted) return refreshed;
+  const CONCURRENCY = 3;
+
+  const refreshConcept = async (file: TFile) => {
+    if (signal?.aborted) return;
     const conceptName = file.basename;
 
-    // Resolve context: prefer saved frontmatter, fall back to article titles
     const context = await deriveContext(conceptName, articles, file, vault);
     log(`Refreshing "${conceptName}" (context: "${context || "none"}")`);
 
-    // 1. Fetch raw candidates
     let rawResults: Array<{ title: string; content: string; url: string }> = [];
     try {
       rawResults = await searchSearXNG(conceptName, context, searxngBaseUrl, searxngToken);
     } catch (e) {
       log(`SearXNG "${conceptName}" failed: ${(e as Error).message}`);
     }
-    await new Promise((r) => setTimeout(r, 1500));
 
     if (rawResults.length === 0) {
       log(`Skipping "${conceptName}": no search results`);
-      continue;
+      return;
     }
 
-    // 2. Filter by relevance
-    const filtered = await filterResultsByRelevance(
-      conceptName,
-      context,
-      rawResults,
-      client,
-      signal
-    );
-    log(
-      `"${conceptName}": ${rawResults.length} raw → ${filtered.length} relevant`
-    );
+    const filtered = await filterResultsByRelevance(conceptName, context, rawResults, client, signal);
+    log(`"${conceptName}": ${rawResults.length} raw → ${filtered.length} relevant`);
 
     const { body, sources } = buildSearchBody(filtered);
     const sourcesSection = sources ? `\n\n## 来源\n\n${sources}` : "";
 
-    // 3. Rebuild frontmatter, preserving search_context
     const existing = await vault.read(file);
     const fmMatch = existing.match(/^(---\n[\s\S]*?\n---)/);
     let newFrontmatter: string;
     if (fmMatch) {
       newFrontmatter = fmMatch[1]
         .replace(/\nrefreshed:.*/, "")
-        .replace(
-          /\n---$/,
-          `\nrefreshed: ${new Date().toISOString().slice(0, 10)}\n---`
-        );
+        .replace(/\n---$/, `\nrefreshed: ${new Date().toISOString().slice(0, 10)}\n---`);
     } else {
       newFrontmatter =
         `---\ntype: concept\nrefreshed: ${new Date().toISOString().slice(0, 10)}` +
@@ -378,11 +354,16 @@ export async function refreshConceptPages(
         `\n---`;
     }
 
-    const newContent =
-      `${newFrontmatter}\n\n# ${conceptName}\n\n## Overview\n\n${body}${sourcesSection}`;
+    const newContent = `${newFrontmatter}\n\n# ${conceptName}\n\n## Overview\n\n${body}${sourcesSection}`;
     await vault.modify(file, newContent);
     log(`Refreshed concept page: "${conceptName}"`);
     refreshed++;
+  };
+
+  for (let i = 0; i < conceptFiles.length; i += CONCURRENCY) {
+    if (signal?.aborted) break;
+    await Promise.all(conceptFiles.slice(i, i + CONCURRENCY).map(refreshConcept));
+    if (i + CONCURRENCY < conceptFiles.length) await new Promise((r) => setTimeout(r, 800));
   }
 
   await crossLinkConcepts(vault, outputFolder);
