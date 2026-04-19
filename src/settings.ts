@@ -26,13 +26,14 @@ export const DEFAULT_CATEGORIES: Record<string, string[]> = {
     "History", "Literature", "Art", "Music",
     "Others",
   ],
+  // NOTE: The Chinese category list below was synchronized from the user's vault `_index.md` on 2026-04-20.
+  // Keep in sync with README.zh-CN.md if you update the categories there.
   zh: [
-    "计算机科学", "数学", "物理", "化学",
-    "生物", "医学", "工程",
-    "经济学", "金融", "商业",
-    "法律", "教育",
-    "哲学", "心理学", "社会学",
-    "历史", "文学", "艺术", "音乐",
+    "天文学", "地球科学", "物理", "化学",
+    "历史", "哲学", "工程", "军事",
+    "教育", "数学", "文学", "生物",
+    "社会学", "经济学", "艺术", "计算机科学",
+    "人工智能", "游戏开发", "游戏设计", "语言学",
     "其他",
   ],
   ja: [
@@ -67,7 +68,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   maxConcurrent: 3,
   searxngBaseUrl: "",
   searxngToken: "",
-  categories: getDefaultCategories("en"),
+  categories: getDefaultCategories("zh"),
 };
 
 const PROVIDER_MODELS: Record<string, string> = {

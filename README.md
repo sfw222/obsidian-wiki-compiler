@@ -66,6 +66,40 @@ Open **Settings → Wiki Compiler**:
 | Max Concurrent | Parallel requests (1–10) | 3 |
 | SearXNG Base URL | URL of your SearXNG instance for concept enrichment | — |
 | SearXNG Token | Optional Bearer token for authenticated SearXNG | — |
+### Default categories (English)
+
+Below are the plugin's default English categories (synchronized from the user's note index). The last entry is the fallback category used when the LLM cannot match any category.
+
+Single-line copyable list:
+
+```
+Astronomy, Earth Sciences, Physics, Chemistry, History, Philosophy, Engineering, Military, Education, Mathematics, Literature, Biology, Sociology, Economics, Art, Computer Science, Artificial Intelligence, Game Development, Game Design, Linguistics, Others
+```
+
+Multi-line:
+
+- Astronomy
+- Earth Sciences
+- Physics
+- Chemistry
+- History
+- Philosophy
+- Engineering
+- Military
+- Education
+- Mathematics
+- Literature
+- Biology
+- Sociology
+- Economics
+- Art
+- Computer Science
+- Artificial Intelligence
+- Game Development
+- Game Design
+- Linguistics
+- Others
+
 
 ### Custom (third-party) provider
 
