@@ -7,7 +7,7 @@ export class OpenAIClient implements LLMClient {
   private model: string;
 
   constructor(settings: PluginSettings, baseURL?: string) {
-    this.client = new OpenAI({ apiKey: settings.apiKey, dangerouslyAllowBrowser: true, ...(baseURL ? { baseURL } : {}) });
+    this.client = new OpenAI({ apiKey: settings.apiKey, ...(settings.confirmAllowBrowser ? { dangerouslyAllowBrowser: true } : {}), ...(baseURL ? { baseURL } : {}) });
     this.model = settings.model || "gpt-4o";
   }
 

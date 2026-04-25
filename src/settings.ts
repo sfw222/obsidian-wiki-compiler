@@ -14,6 +14,7 @@ export interface PluginSettings {
   searxngBaseUrl: string;
   searxngToken: string;
   categories: string[];
+  confirmAllowBrowser?: boolean;
 }
 
 export const DEFAULT_CATEGORIES: Record<string, string[]> = {
@@ -68,7 +69,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   maxConcurrent: 3,
   searxngBaseUrl: "",
   searxngToken: "",
-  categories: getDefaultCategories("zh"),
+  categories: getDefaultCategories("en"),
+  confirmAllowBrowser: false,
 };
 
 const PROVIDER_MODELS: Record<string, string> = {
@@ -155,6 +157,23 @@ export class WikiCompilerSettingTab extends PluginSettingTab {
           })
         );
     }
+
+    // Security: show warning when using remote providers with API key, and allow explicit confirmation toggle
+    if (this.plugin.settings.llmProvider !== "ollama" && this.plugin.settings.apiKey) {
+      new Setting(containerEl)
+        .setName("Security warning")
+        .setDesc("<span style='color:red'>⚠️ 注意：你正在为远端 LLM（OpenAI/Anthropic/Custom）输入 API Key。这可能会在不安全的环境中泄露密钥。建议使用 Ollama (local) 或将 Custom 代理部署在本地。</span>");
+    }
+
+    new Setting(containerEl)
+      .setName("Confirm allow browser usage")
+      .setDesc("勾选以确认你理解将 API Key 暴露于客户端/浏览器请求的风险，并允许在浏览器上下文中使用它（不推荐）。")
+      .addToggle((t) =>
+        t.setValue(!!this.plugin.settings.confirmAllowBrowser).onChange(async (v) => {
+          this.plugin.settings.confirmAllowBrowser = v;
+          await this.plugin.saveSettings();
+        })
+      );
 
     new Setting(containerEl)
       .setName("Model")

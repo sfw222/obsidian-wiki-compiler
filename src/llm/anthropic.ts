@@ -7,7 +7,7 @@ export class AnthropicClient implements LLMClient {
   private model: string;
 
   constructor(settings: PluginSettings, baseURL?: string) {
-    this.client = new Anthropic({ apiKey: settings.apiKey, dangerouslyAllowBrowser: true, ...(baseURL ? { baseURL } : {}) });
+    this.client = new Anthropic({ apiKey: settings.apiKey, ...(settings.confirmAllowBrowser ? { dangerouslyAllowBrowser: true } : {}), ...(baseURL ? { baseURL } : {}) });
     this.model = settings.model || "claude-opus-4-6";
   }
 

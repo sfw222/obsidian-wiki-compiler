@@ -5,6 +5,10 @@ export interface LLMClient {
 }
 
 export function createLLMClient(settings: PluginSettings): LLMClient {
+  if (settings.llmProvider !== "ollama" && settings.apiKey) {
+    console.warn("WikiCompiler: Using API key with a remote provider may expose your key in client/browser contexts.");
+  }
+
   switch (settings.llmProvider) {
     case "openai": {
       const { OpenAIClient } = require("./openai");
