@@ -1,7 +1,7 @@
 import { TFile, Vault } from "obsidian";
 import { PluginSettings } from "./settings";
 import { createLLMClient } from "./llm/client";
-import { generateArticle, updateExistingArticle, WikiArticle } from "./wiki/generator";
+import { generateArticle, updateExistingArticle, extractStructuredKnowledge, WikiArticle } from "./wiki/generator";
 import { injectBidirectionalLinks } from "./wiki/linker";
 import { categoryPath, sanitizeFolderName } from "./wiki/classifier";
 import { extractAndEnrichConcepts } from "./wiki/concepts";
@@ -54,6 +54,26 @@ export async function processFiles(
         try {
           const content = await vault.read(file);
           const article = await generateArticle(file.basename, content, client, settings, signal, existingTitles);
+
+          // Phase 2: structured knowledge extraction (non-blocking)
+          if (settings.enableStructuredExtraction !== false && !signal.aborted) {
+            const structured = await extractStructuredKnowledge(file.basename, article.content, client, settings, signal);
+            if (structured) {
+              article.type = structured.type;
+              article.definition = structured.definition;
+              article.summary = structured.summary;
+              article.facts = structured.facts;
+              article.relations = structured.relations;
+              article.faq = structured.faq;
+              article.status = "verified";
+            }
+          }
+
+          // Set source mtime for change tracking
+          article.sourceMtime = file.stat.mtime;
+          // Generate stable id from title
+          article.id = article.title.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-").replace(/^-|-$/g, "");
+
           const attachments = extractAttachmentRefs(content);
           if (attachments.length > 0) {
             article.content += "\n\n## Attachments\n\n" + attachments.map((r) => `![[${r}]]`).join("\n\n");
@@ -138,7 +158,46 @@ async function writeArticles(articles: WikiArticle[], vault: Vault, settings: Pl
     }
     usedPaths.add(filePath);
 
-    const frontmatter = `---\nsource: "[[${article.sourceFile}]]"\ncategory: ${article.category}\ngenerated: ${new Date().toISOString().slice(0, 10)}\n---\n\n`;
+    const today = new Date().toISOString().slice(0, 10);
+    const factsYaml = article.facts.length > 0
+      ? "facts:\n" + article.facts.map(f =>
+          `  - name: ${JSON.stringify(f.name)}\n    value: ${JSON.stringify(f.value)}\n    source: ${JSON.stringify(f.source || "[[" + article.sourceFile + "]]")}`
+        ).join("\n")
+      : "facts: []";
+    const relationsYaml = article.relations.length > 0
+      ? "relations:\n" + article.relations.map(r =>
+          `  - predicate: ${JSON.stringify(r.predicate)}\n    target: ${JSON.stringify(r.target)}\n    source: ${JSON.stringify(r.source || "[[" + article.sourceFile + "]]")}`
+        ).join("\n")
+      : "relations: []";
+    const faqYaml = article.faq.length > 0
+      ? "faq:\n" + article.faq.map(q =>
+          `  - question: ${JSON.stringify(q.question)}\n    answer: ${JSON.stringify(q.answer)}\n    source: ${JSON.stringify(q.source || "[[" + article.sourceFile + "]]")}\n    status: ${JSON.stringify(q.status)}`
+        ).join("\n")
+      : "faq: []";
+    const frontmatter = [
+      "---",
+      `id: ${JSON.stringify(article.id)}`,
+      `title: ${JSON.stringify(article.title)}`,
+      `type: ${article.type}`,
+      `category: ${article.category}`,
+      `status: ${article.status}`,
+      `source: "[[${article.sourceFile}]]"`,
+      `source_mtime: ${article.sourceMtime}`,
+      `created: ${today}`,
+      `updated: ${today}`,
+      `lastReviewed: ${today}`,
+      `reviewer: ""`,
+      `definition: ${JSON.stringify(article.definition)}`,
+      `summary: ${JSON.stringify(article.summary)}`,
+      `search_context: ""`,
+      `tags: [${["type/" + article.type, "cat/" + article.category, "status/" + article.status].map(t => JSON.stringify(t)).join(", ")}]`,
+      factsYaml,
+      relationsYaml,
+      faqYaml,
+      "---",
+      "",
+      "",
+    ].join("\n");
     const body = article.content.startsWith("#") ? article.content : `# ${article.title}\n\n${article.content}`;
 
     const existing = vault.getAbstractFileByPath(filePath);

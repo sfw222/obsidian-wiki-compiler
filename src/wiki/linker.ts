@@ -17,6 +17,11 @@ export function injectBidirectionalLinks(articles: WikiArticle[]): WikiArticle[]
 
   return articles.map((a) => {
     const seeAlso = new Set<string>(a.relatedTopics);
+    // Add relation targets (strip [[ ]] wrapper if present)
+    for (const r of a.relations ?? []) {
+      const target = r.target.replace(/^\[\[(.+)\]\]$/, "$1");
+      seeAlso.add(target);
+    }
     // Add backlinks from other articles that reference this one
     const incoming = backlinks.get(a.title.toLowerCase());
     if (incoming) for (const t of incoming) seeAlso.add(t);

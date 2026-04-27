@@ -6,10 +6,7 @@
     "dev": "node esbuild.config.mjs",
     "build": "node esbuild.config.mjs production"
   },
-  "dependencies": {
-    "openai": "^4.47.0",
-    "@anthropic-ai/sdk": "^0.24.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.0.0",
     "builtin-modules": "^3.3.0",

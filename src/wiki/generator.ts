@@ -1,12 +1,40 @@
 import { LLMClient } from "../llm/client";
 import { PluginSettings, getFallbackCategory } from "../settings";
 
+export interface WikiFact {
+  name: string;
+  value: string;
+  source: string;
+}
+
+export interface WikiRelation {
+  predicate: string;
+  target: string;
+  source: string;
+}
+
+export interface WikiFaq {
+  question: string;
+  answer: string;
+  source: string;
+  status: "ai-inferred" | "user-confirmed";
+}
+
 export interface WikiArticle {
   sourceFile: string;
+  sourceMtime: number;
+  id: string;
   title: string;
+  type: "Concept" | "Process" | "Policy" | "Metric" | "Task" | "Other";
   category: string;
+  status: "draft" | "verified" | "needs-review" | "deprecated";
+  definition: string;
+  summary: string;
   content: string;
   relatedTopics: string[];
+  facts: WikiFact[];
+  relations: WikiRelation[];
+  faq: WikiFaq[];
 }
 
 const SYSTEM_PROMPT = `You are a knowledge base wiki writer. Given a personal note, extract the core knowledge and write a comprehensive encyclopedic wiki article.
@@ -152,14 +180,105 @@ export async function generateArticle(
     }
     return {
       sourceFile,
+      sourceMtime: 0,
+      id: "",
       title: parsed.title && parsed.title !== sourceFile ? parsed.title : sourceFile,
+      type: "Other",
       category,
+      status: "draft",
+      definition: "",
+      summary: "",
       content: parsed.content ?? raw,
       relatedTopics: Array.isArray(parsed.relatedTopics) ? parsed.relatedTopics : [],
+      facts: [],
+      relations: [],
+      faq: [],
     };
   } catch (e) {
     console.log("generateArticle: failed to parse JSON from LLM after retries; returning fallback article.", (e as Error).message);
-    return { sourceFile, title: sourceFile, category: fallback, content: raw, relatedTopics: [] };
+    return { sourceFile, sourceMtime: 0, id: "", title: sourceFile, type: "Other", category: fallback, status: "draft", definition: "", summary: "", content: raw, relatedTopics: [], facts: [], relations: [], faq: [] };
+  }
+}
+
+const STRUCTURED_EXTRACT_PROMPT = `You are a knowledge analyst. Given a wiki article, extract structured knowledge in strict JSON format.
+
+You MUST return ONLY a valid JSON object. No explanation, no markdown fences.
+
+Required JSON shape:
+{
+  "type": "Concept",
+  "definition": "One sentence definition of the main topic.",
+  "summary": "2-3 sentence summary of the article's core knowledge.",
+  "facts": [
+    {"name": "fact name", "value": "fact value", "source": ""}
+  ],
+  "relations": [
+    {"predicate": "depends_on", "target": "[[Target Title]]", "source": ""}
+  ],
+  "faq": [
+    {"question": "Common question?", "answer": "Clear answer.", "source": "", "status": "ai-inferred"}
+  ]
+}
+
+Rules:
+- type: MUST be exactly one of: Concept, Process, Policy, Metric, Task, Other
+- definition: one concise sentence only
+- summary: 2-3 sentences max
+- facts: 2-5 most important structured facts. Each name should be a short label (e.g. "核心目标", "适用场景"). source always ""
+- relations: 2-5 most important explicit relations. predicate must be one of: is_a, part_of, depends_on, uses, owned_by, related_to, enables, supports, has_metric, alternative_to. target MUST use [[Title]] wikilink format. source always ""
+- faq: 1-3 most likely questions a user would ask. status always "ai-inferred". source always ""
+- LANGUAGE: {LANGUAGE}`;
+
+export async function extractStructuredKnowledge(
+  sourceFile: string,
+  articleContent: string,
+  client: LLMClient,
+  settings: PluginSettings,
+  signal?: AbortSignal
+): Promise<Pick<WikiArticle, "type" | "definition" | "summary" | "facts" | "relations" | "faq"> | null> {
+  const langInstr = languageInstruction(settings.outputLanguage);
+  const systemPrompt = STRUCTURED_EXTRACT_PROMPT.replace("{LANGUAGE}", langInstr);
+  const userMsg = `Article title: ${sourceFile}\n\nArticle content:\n${articleContent}`;
+
+  let raw = "";
+  try {
+    raw = await client.complete(systemPrompt, userMsg, signal);
+    let parsed = parseJsonFromLLM(raw);
+
+    if (!parsed) {
+      for (let attempt = 1; attempt <= 2 && !parsed; attempt++) {
+        const retryMsg = `${userMsg}\n\nIMPORTANT: Return ONLY valid JSON starting with '{' and ending with '}'.`;
+        raw = await client.complete(systemPrompt, retryMsg, signal);
+        parsed = parseJsonFromLLM(raw);
+      }
+    }
+
+    if (!parsed) return null;
+
+    return {
+      type: (["Concept","Process","Policy","Metric","Task","Other"].includes(parsed.type) ? parsed.type : "Concept") as WikiArticle["type"],
+      definition: typeof parsed.definition === "string" ? parsed.definition : "",
+      summary: typeof parsed.summary === "string" ? parsed.summary : "",
+      facts: Array.isArray(parsed.facts) ? parsed.facts.map((f: any) => ({
+        name: String(f.name ?? ""),
+        value: String(f.value ?? ""),
+        source: String(f.source ?? ""),
+      })) : [],
+      relations: Array.isArray(parsed.relations) ? parsed.relations.map((r: any) => ({
+        predicate: String(r.predicate ?? "related_to"),
+        target: String(r.target ?? ""),
+        source: String(r.source ?? ""),
+      })) : [],
+      faq: Array.isArray(parsed.faq) ? parsed.faq.map((q: any) => ({
+        question: String(q.question ?? ""),
+        answer: String(q.answer ?? ""),
+        source: String(q.source ?? ""),
+        status: "ai-inferred" as const,
+      })) : [],
+    };
+  } catch (e) {
+    console.warn(`[WikiCompiler] Phase 2 extraction failed for "${sourceFile}":`, (e as Error).message);
+    return null;
   }
 }
 
