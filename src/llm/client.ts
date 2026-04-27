@@ -1,34 +1,25 @@
 import { PluginSettings } from "../settings";
+import { OpenAIClient } from "./openai";
+import { AnthropicClient } from "./anthropic";
+import { OllamaClient } from "./ollama";
+import { CustomOpenAIClient } from "./custom-openai";
+import { CustomAnthropicClient } from "./custom-anthropic";
 
 export interface LLMClient {
   complete(systemPrompt: string, userContent: string, signal?: AbortSignal): Promise<string>;
 }
 
 export function createLLMClient(settings: PluginSettings): LLMClient {
-  if (settings.llmProvider !== "ollama" && settings.apiKey) {
-    console.warn("WikiCompiler: Using API key with a remote provider may expose your key in client/browser contexts.");
-  }
-
   switch (settings.llmProvider) {
-    case "openai": {
-      const { OpenAIClient } = require("./openai");
+    case "openai":
       return new OpenAIClient(settings);
-    }
-    case "anthropic": {
-      const { AnthropicClient } = require("./anthropic");
+    case "anthropic":
       return new AnthropicClient(settings);
-    }
-    case "ollama": {
-      const { OllamaClient } = require("./ollama");
+    case "ollama":
       return new OllamaClient(settings);
-    }
-    case "custom": {
-      if (settings.customCompatibility === "anthropic") {
-        const { CustomAnthropicClient } = require("./custom-anthropic");
-        return new CustomAnthropicClient(settings);
-      }
-      const { CustomOpenAIClient } = require("./custom-openai");
-      return new CustomOpenAIClient(settings);
-    }
+    case "custom":
+      return settings.customCompatibility === "anthropic"
+        ? new CustomAnthropicClient(settings)
+        : new CustomOpenAIClient(settings);
   }
 }

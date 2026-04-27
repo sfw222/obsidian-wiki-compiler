@@ -15,6 +15,8 @@ export interface PluginSettings {
   searxngToken: string;
   categories: string[];
   confirmAllowBrowser?: boolean;
+  enableStructuredExtraction?: boolean;
+  reviewIntervalDays?: number;
 }
 
 export const DEFAULT_CATEGORIES: Record<string, string[]> = {
@@ -71,6 +73,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   searxngToken: "",
   categories: getDefaultCategories("en"),
   confirmAllowBrowser: false,
+  enableStructuredExtraction: true,
+  reviewIntervalDays: 90,
 };
 
 const PROVIDER_MODELS: Record<string, string> = {

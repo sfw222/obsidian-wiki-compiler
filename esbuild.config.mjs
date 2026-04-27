@@ -1,6 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
 import builtins from "builtin-modules";
+import { copyFileSync } from "fs";
 
 const prod = process.argv[2] === "production";
 
@@ -29,6 +30,13 @@ esbuild.build({
   logLevel: "info",
   sourcemap: prod ? false : "inline",
   treeShaking: true,
-  outfile: "main.js",
+  outfile: prod ? "F:/mynote/.obsidian/plugins/wiki-compiler/main.js" : "main.js",
   minify: prod,
+}).then(() => {
+  if (prod) {
+    const dest = "F:/mynote/.obsidian/plugins/wiki-compiler";
+    copyFileSync("manifest.json", `${dest}/manifest.json`);
+    copyFileSync("styles.css", `${dest}/styles.css`);
+    console.log("Deployed manifest.json + styles.css");
+  }
 }).catch(() => process.exit(1));
