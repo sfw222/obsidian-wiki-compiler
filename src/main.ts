@@ -1,6 +1,6 @@
 import { App, Notice, Plugin, TFile, TFolder, Menu } from "obsidian";
 import { DEFAULT_SETTINGS, PluginSettings, WikiCompilerSettingTab } from "./settings";
-import { processFiles, appendLog, patchAttachmentsFromRaw, writeRunLog, ProcessResult } from "./processor";
+import { processFiles, appendLog, patchAttachmentsFromRaw, writeRunLog, ProcessResult, createRunStamp, formatLocalDate, formatLocalTime } from "./processor";
 import { ProgressModal } from "./ui/ProgressModal";
 import { ResultModal } from "./ui/ResultModal";
 import { QueryModal } from "./ui/QueryModal";
@@ -115,7 +115,7 @@ export default class WikiCompilerPlugin extends Plugin {
     if (!this.app.vault.getAbstractFileByPath(folder)) {
       await this.app.vault.createFolder(folder);
     }
-    const date = new Date().toISOString().slice(0, 10);
+    const date = formatLocalDate(new Date());
     const safeName = question.slice(0, 40).replace(/[\\/:*?"<>|]/g, "").trim();
     const path = `${folder}/${date}-${safeName}.md`;
     const content = `# ${question}\n\n${answer}`;
@@ -140,7 +140,7 @@ export default class WikiCompilerPlugin extends Plugin {
     const runStart = new Date();
     const runLog: string[] = [];
     const log = (msg: string) => {
-      const ts = new Date().toISOString().slice(11, 19);
+      const ts = formatLocalTime(new Date());
       runLog.push(`- \`${ts}\` ${msg}`);
       console.log(`[WikiCompiler] ${msg}`);
     };
@@ -173,7 +173,7 @@ export default class WikiCompilerPlugin extends Plugin {
       stage(3, 4, "阶段 4/4：写入并打开报告");
       const reportPath = `${this.settings.outputFolder}/_lint-report.md`;
       const existing = this.app.vault.getAbstractFileByPath(reportPath);
-      const content = `---\ngenerated: ${new Date().toISOString().slice(0, 10)}\n---\n\n# Wiki 健康检查报告\n\n${lintResult.report}`;
+      const content = `---\ngenerated: ${formatLocalDate(new Date())}\n---\n\n# Wiki 健康检查报告\n\n${lintResult.report}`;
       if (existing instanceof TFile) {
         await this.app.vault.modify(existing, content);
       } else {
@@ -193,7 +193,7 @@ export default class WikiCompilerPlugin extends Plugin {
       }
       log(`Lint 完成，用时 ${duration}s`);
       await writeRunLog(this.app.vault, this.settings.outputFolder, runStart, runLog);
-      const stamp = runStart.toISOString().slice(0, 19).replace(/:/g, "-");
+      const stamp = createRunStamp(runStart);
       await appendLog(this.app.vault, this.settings.outputFolder, "lint", ["_lint-report", `_runs/${stamp}|Lint Run`]);
 
       new Notice("Wiki Compiler: Lint complete. Report opened.");
@@ -202,13 +202,13 @@ export default class WikiCompilerPlugin extends Plugin {
       if (err.name === "AbortError") {
         log("Lint 已取消");
         await writeRunLog(this.app.vault, this.settings.outputFolder, runStart, runLog);
-        const stamp = runStart.toISOString().slice(0, 19).replace(/:/g, "-");
+        const stamp = createRunStamp(runStart);
         await appendLog(this.app.vault, this.settings.outputFolder, "lint-cancelled", [`_runs/${stamp}|Lint Run`]);
         new Notice("Wiki Compiler: Lint canceled.");
       } else {
         log(`Lint 失败：${err.message}`);
         await writeRunLog(this.app.vault, this.settings.outputFolder, runStart, runLog);
-        const stamp = runStart.toISOString().slice(0, 19).replace(/:/g, "-");
+        const stamp = createRunStamp(runStart);
         await appendLog(this.app.vault, this.settings.outputFolder, "lint-error", [`_runs/${stamp}|Lint Run`]);
         new Notice(`Wiki Compiler lint error: ${err.message}`);
       }
@@ -226,7 +226,7 @@ export default class WikiCompilerPlugin extends Plugin {
     const runStart = new Date();
     const runLog: string[] = [];
     const log = (msg: string) => {
-      const ts = new Date().toISOString().slice(11, 19);
+      const ts = formatLocalTime(new Date());
       runLog.push(`- \`${ts}\` ${msg}`);
       console.log(`[WikiCompiler] ${msg}`);
     };

@@ -9,6 +9,24 @@ import { extractAndEnrichConcepts } from "./wiki/concepts";
 const RAW_FOLDER = "raw";
 const WIKI_SUBFOLDER = "Wiki";
 
+const pad2 = (n: number): string => n.toString().padStart(2, "0");
+
+export function formatLocalDate(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+export function formatLocalTime(date: Date): string {
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
+
+export function formatLocalDateTime(date: Date): string {
+  return `${formatLocalDate(date)} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+export function createRunStamp(date: Date): string {
+  return `${formatLocalDate(date)}T${pad2(date.getHours())}-${pad2(date.getMinutes())}-${pad2(date.getSeconds())}`;
+}
+
 export interface ProcessResult {
   articlesGenerated: number;
   articlesUpdated: number;
@@ -30,7 +48,7 @@ export async function processFiles(
   const runLog: string[] = [];
   const runStart = new Date();
   const log = (msg: string) => {
-    const ts = new Date().toISOString().slice(11, 19);
+    const ts = formatLocalTime(new Date());
     runLog.push(`- \`${ts}\` ${msg}`);
     console.log(`[WikiCompiler] ${msg}`);
   };
@@ -158,7 +176,7 @@ async function writeArticles(articles: WikiArticle[], vault: Vault, settings: Pl
     }
     usedPaths.add(filePath);
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = formatLocalDate(new Date());
     const factsYaml = article.facts.length > 0
       ? "facts:\n" + article.facts.map(f =>
           `  - name: ${JSON.stringify(f.name)}\n    value: ${JSON.stringify(f.value)}\n    source: ${JSON.stringify(f.source || "[[" + article.sourceFile + "]]")}`
@@ -309,7 +327,7 @@ async function incrementallyUpdateRelated(
 
 export async function appendLog(vault: Vault, outputFolder: string, operation: string, items: string[]): Promise<void> {
   const logPath = `${outputFolder}/_log.md`;
-  const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+  const timestamp = formatLocalDateTime(new Date());
   const entry = `- ${timestamp} **${operation}**: ${items.map((t) => `[[${t}]]`).join(", ")}\n`;
   const existing = vault.getAbstractFileByPath(logPath);
   if (existing instanceof TFile) {
@@ -321,16 +339,16 @@ export async function appendLog(vault: Vault, outputFolder: string, operation: s
 }
 
 export async function writeRunLog(vault: Vault, outputFolder: string, runStart: Date, lines: string[]): Promise<void> {
-  const stamp = runStart.toISOString().slice(0, 19).replace("T", "T").replace(/:/g, "-");
+  const stamp = createRunStamp(runStart);
   const logsFolder = `${outputFolder}/_runs`;
   await ensureFolder(vault, logsFolder);
   const runLogPath = `${logsFolder}/${stamp}.md`;
-  const content = `# Wiki Compiler Run — ${runStart.toISOString().slice(0, 16).replace("T", " ")}\n\n${lines.join("\n")}\n`;
+  const content = `# Wiki Compiler Run — ${formatLocalDateTime(runStart)}\n\n${lines.join("\n")}\n`;
   await vault.create(runLogPath, content);
 
   // Reference from _log.md
   const logPath = `${outputFolder}/_log.md`;
-  const ref = `- [[_runs/${stamp}|Run ${runStart.toISOString().slice(0, 16).replace("T", " ")}]]\n`;
+  const ref = `- [[_runs/${stamp}|Run ${formatLocalDateTime(runStart)}]]\n`;
   const existing = vault.getAbstractFileByPath(logPath);
   if (existing instanceof TFile) {
     const text = await vault.read(existing);

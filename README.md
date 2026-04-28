@@ -24,7 +24,7 @@ Transform your Obsidian notes into a structured, interconnected Wiki using LLMs.
 - **Wiki lint** — two-stage health check with progress modal and cancel support: (1) code-level static analysis with no LLM cost — detects missing `source` fields, facts/relations without source, articles overdue for review (auto-flagged as `needs-review`), and orphan pages; (2) LLM analysis for contradictions, missing concepts, stale content, and actionable fix suggestions. After completion, `_lint-report.md` is opened automatically. The latest lint always updates `_lint-report.md`, while full per-run details are preserved in `_runs/` and referenced from `_log.md`.
 - **Source archival** — processed notes are moved to `raw/` folder to avoid reprocessing
 - **Cumulative index** — `_index.md` merges all articles across sessions, organized by category
-- **Activity log** — `_log.md` tracks all operations (ingest, query, lint, concept extraction); detailed per-run logs with step-by-step timing are saved to `_runs/`
+- **Activity log** — `_log.md` tracks all operations (ingest, query, lint, concept extraction); detailed per-run logs with step-by-step timing are saved to `_runs/`, and timestamps use your local timezone
 - **Progress UI** — real-time progress modal with cancel support
 - **Multi-provider LLM support** — OpenAI, Anthropic (Claude), Ollama (local), or any custom third-party API; zero third-party SDK dependencies (native `requestUrl` only)
 
@@ -209,7 +209,7 @@ Each article includes:
 5. **Archive** — Source notes are moved to `raw/` to prevent reprocessing
 6. **Index** — `_index.md` is updated with new entries, organized by category
 7. **Enrich** — If SearXNG is configured, high-frequency concepts are extracted, searched on the web, and turned into dedicated concept pages with structured frontmatter; already-existing concepts are skipped automatically
-8. **Log** — A timestamped run log is saved to `_runs/` with per-step details for every compilation run
+8. **Log** — A timestamped run log is saved to `_runs/` with per-step details for every compilation run (using your local timezone)
 
 ---
 

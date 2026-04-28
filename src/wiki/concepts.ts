@@ -2,6 +2,12 @@ import { TFile, Vault, requestUrl, Notice } from "obsidian";
 import { LLMClient } from "../llm/client";
 import { WikiArticle } from "./generator";
 
+const pad2 = (n: number): string => n.toString().padStart(2, "0");
+
+function formatLocalDate(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
 const EXTRACT_PROMPT = `You are a knowledge analyst. Given a list of wiki articles, extract the most important high-frequency concepts that appear across multiple articles.
 
 Return ONLY a JSON array of objects. No explanation, no markdown fences.
@@ -257,7 +263,7 @@ export async function extractAndEnrichConcepts(
     } else {
       const safeConceptName = concept.replace(/[\\/:*?"<>|]/g, "-").trim();
       const filePath = `${conceptFolder}/${safeConceptName}.md`;
-      const today = new Date().toISOString().slice(0, 10);
+      const today = formatLocalDate(new Date());
       const conceptId = concept.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fa5]+/g, "-").replace(/^-|-$/g, "");
       // Build relations: this concept has_concept relation pointing to wiki articles that mention it
       const mentioningArticles = articles.filter(a =>
@@ -368,7 +374,7 @@ export async function refreshConceptPages(
     const existing = await vault.read(file);
     const fmMatch = existing.match(/^(---\n[\s\S]*?\n---)/);
     let newFrontmatter: string;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = formatLocalDate(new Date());
     if (fmMatch) {
       newFrontmatter = fmMatch[1]
         .replace(/\nupdated:.*/, "")
