@@ -21,7 +21,7 @@ Transform your Obsidian notes into a structured, interconnected Wiki using LLMs.
 - **Concept page refresh** — re-search all existing concept pages using context derived from which wiki articles mention each concept, enabling automatic disambiguation; useful for improving pages that were generated without sufficient domain context
 - **Patch attachments** — retroactively finds attachment references (`![[...]]`) in archived raw notes and appends them to the corresponding wiki articles; does not require LLM
 - **Wiki query** — structured pre-retrieval first matches your question against `facts`, `faq`, and `relations` fields before passing context to the LLM; answers use academic-style numbered citations `[1][2]`; click citation numbers to jump to references; copy answer to clipboard; results saved as query notes
-- **Wiki lint** — two-stage health check: (1) code-level static analysis with no LLM cost — detects missing `source` fields, facts/relations without source, articles overdue for review (auto-flagged as `needs-review`), and orphan pages; (2) LLM analysis for contradictions, missing concepts, and stale content
+- **Wiki lint** — two-stage health check with progress modal and cancel support: (1) code-level static analysis with no LLM cost — detects missing `source` fields, facts/relations without source, articles overdue for review (auto-flagged as `needs-review`), and orphan pages; (2) LLM analysis for contradictions, missing concepts, stale content, and actionable fix suggestions. After completion, `_lint-report.md` is opened automatically. The latest lint always updates `_lint-report.md`, while full per-run details are preserved in `_runs/` and referenced from `_log.md`.
 - **Source archival** — processed notes are moved to `raw/` folder to avoid reprocessing
 - **Cumulative index** — `_index.md` merges all articles across sessions, organized by category
 - **Activity log** — `_log.md` tracks all operations (ingest, query, lint, concept extraction); detailed per-run logs with step-by-step timing are saved to `_runs/`
@@ -140,11 +140,18 @@ A modal opens where you can ask questions. The LLM answers based on your wiki co
 
 Command palette: `Wiki Compiler: Lint Wiki (health check)`
 
-Generates `_lint-report.md` covering:
+Shows a staged progress modal during linting and supports cancellation.
+
+Generates (or updates) `_lint-report.md` covering:
 - Contradictions between pages
 - Orphan pages with no incoming links
 - Missing concepts that deserve their own page
 - Stale or outdated content
+
+Notes:
+- The latest lint result overwrites `_lint-report.md`.
+- Full execution history is kept in `_runs/` and linked from `_log.md`.
+- The report file is opened automatically after lint completes.
 
 ### Refresh concept pages
 
@@ -182,7 +189,7 @@ Wiki/
 ├── _runs/                     ← per-run detailed logs (timestamped)
 ├── _index.md                  ← cumulative article index
 ├── _log.md                    ← activity log
-└── _lint-report.md            ← latest lint report
+└── _lint-report.md            ← latest lint report (updated each run)
 ```
 
 Each article includes:
