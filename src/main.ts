@@ -134,23 +134,86 @@ export default class WikiCompilerPlugin extends Plugin {
       new Notice("Wiki Compiler: Please set your API key in settings.");
       return;
     }
-    new Notice("Wiki Compiler: Running lint...");
+    const modal = new ProgressModal(this.app);
+    modal.open();
+
+    const runStart = new Date();
+    const runLog: string[] = [];
+    const log = (msg: string) => {
+      const ts = new Date().toISOString().slice(11, 19);
+      runLog.push(`- \`${ts}\` ${msg}`);
+      console.log(`[WikiCompiler] ${msg}`);
+    };
+
+    const stage = (done: number, total: number, text: string) => {
+      modal.update(done, total, text);
+      log(text);
+    };
+
     try {
+      stage(0, 4, "阶段 1/4：加载 Wiki 上下文");
       const wikiContext = await this.loadWikiContext();
+      if (modal.signal.aborted) {
+        const err = new Error("Lint canceled");
+        err.name = "AbortError";
+        throw err;
+      }
+
+      stage(1, 4, "阶段 2/4：代码级检查");
       const client = createLLMClient(this.settings);
-      const report = await lintWiki(wikiContext, client);
+      const lintResult = await lintWiki(wikiContext, client, {
+        signal: modal.signal,
+        vault: this.app.vault,
+        outputFolder: this.settings.outputFolder,
+        settings: this.settings,
+        onStage: (s) => stage(2, 4, s),
+        onDetail: (msg) => log(msg),
+      });
+
+      stage(3, 4, "阶段 4/4：写入并打开报告");
       const reportPath = `${this.settings.outputFolder}/_lint-report.md`;
       const existing = this.app.vault.getAbstractFileByPath(reportPath);
-      const content = `---\ngenerated: ${new Date().toISOString().slice(0, 10)}\n---\n\n# Wiki Lint Report\n\n${report}`;
+      const content = `---\ngenerated: ${new Date().toISOString().slice(0, 10)}\n---\n\n# Wiki 健康检查报告\n\n${lintResult.report}`;
       if (existing instanceof TFile) {
         await this.app.vault.modify(existing, content);
       } else {
         await this.app.vault.create(reportPath, content);
       }
-      new Notice("Wiki Compiler: Lint complete. See _lint-report.md");
-      await appendLog(this.app.vault, this.settings.outputFolder, "lint", ["_lint-report"]);
+
+      const reportFile = this.app.vault.getAbstractFileByPath(reportPath);
+      if (reportFile instanceof TFile) {
+        await this.app.workspace.getLeaf(true).openFile(reportFile);
+      }
+
+      const duration = Math.round((Date.now() - runStart.getTime()) / 1000);
+      if (lintResult.codeStats) {
+        log(
+          `Lint 统计：文章 ${lintResult.codeStats.totalArticles}，缺失source ${lintResult.codeStats.missingSource}，缺失来源 ${lintResult.codeStats.missingFieldSource}，超期 ${lintResult.codeStats.needsReview}，状态自动更新 ${lintResult.codeStats.statusUpdatedToNeedsReview}，孤立 ${lintResult.codeStats.orphans}`
+        );
+      }
+      log(`Lint 完成，用时 ${duration}s`);
+      await writeRunLog(this.app.vault, this.settings.outputFolder, runStart, runLog);
+      const stamp = runStart.toISOString().slice(0, 19).replace(/:/g, "-");
+      await appendLog(this.app.vault, this.settings.outputFolder, "lint", ["_lint-report", `_runs/${stamp}|Lint Run`]);
+
+      new Notice("Wiki Compiler: Lint complete. Report opened.");
     } catch (e) {
-      new Notice(`Wiki Compiler lint error: ${(e as Error).message}`);
+      const err = e as Error;
+      if (err.name === "AbortError") {
+        log("Lint 已取消");
+        await writeRunLog(this.app.vault, this.settings.outputFolder, runStart, runLog);
+        const stamp = runStart.toISOString().slice(0, 19).replace(/:/g, "-");
+        await appendLog(this.app.vault, this.settings.outputFolder, "lint-cancelled", [`_runs/${stamp}|Lint Run`]);
+        new Notice("Wiki Compiler: Lint canceled.");
+      } else {
+        log(`Lint 失败：${err.message}`);
+        await writeRunLog(this.app.vault, this.settings.outputFolder, runStart, runLog);
+        const stamp = runStart.toISOString().slice(0, 19).replace(/:/g, "-");
+        await appendLog(this.app.vault, this.settings.outputFolder, "lint-error", [`_runs/${stamp}|Lint Run`]);
+        new Notice(`Wiki Compiler lint error: ${err.message}`);
+      }
+    } finally {
+      modal.close();
     }
   }
 
